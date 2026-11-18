@@ -137,6 +137,180 @@ def gasLimit : Property IO := pureIO do
     (¬ ((limit + 1 : Int) - parent).natAbs < delta ∨ target < limit) ∧
     (¬ ((limit : Int) - 1 - parent).natAbs < delta ∨ limit < target)) "a closer limit is valid"
 
+/-! ## The byte reader, as a state machine -/
+
+/-- The model of a reader: the whole input and how far it was read. -/
+structure ReaderModel where
+  data : List UInt8
+  /-- The position before the last read. -/
+  before : Nat
+  pos : Nat
+  deriving Repr
+
+/-- What a reader can be asked.  The set is fixed, so it is one type. -/
+inductive Read where
+  | bytes (n : Nat)
+  | uint (n : Nat)
+  | require (holds : Bool)
+  deriving Repr, BEq
+
+/-- The width a read consumes. -/
+def Read.width : Read → Nat
+  | .bytes n | .uint n => n
+  | .require _ => 0
+
+/-- Whether the read succeeds from a position of the model. -/
+def ReaderModel.accepts (s : ReaderModel) : Read → Bool
+  | .require holds => holds
+  | t => s.before + t.width ≤ s.data.length
+
+/-- A read moves the position when the bytes are there, and otherwise changes nothing. -/
+def readerModel : Model ReaderModel Read where
+  initState := (fun data => ⟨data, 0, 0⟩) <$> genByteList (.linear 0 40)
+  transitions s :=
+    let left := s.data.length - s.pos
+    -- Widths up to the bytes left, exactly the bytes left, and one past them.
+    let width := Gen.frequency [(6, Gen.nat (.constant 0 left)), (1, pure left), (2, pure (left + 1))]
+    Gen.frequency [(4, Read.bytes <$> width), (4, Read.uint <$> width), (1, Read.require <$> Gen.bool)]
+  apply s t :=
+    let s := { s with before := s.pos }
+    if s.accepts t then { s with pos := s.pos + t.width } else s
+
+/-- The reader on what is left of the input, against the model. -/
+def readerMachine : StateMachine ReaderModel Read (List UInt8) IO where
+  toModel := readerModel
+  initSut s := pure s.data
+  applySut input s t := do
+    let field := (s.data.drop s.before).take t.width
+    let run {α : Type} [BEq α] [Repr α] (reader : ByteReader.Reader Unit α) (want : α) :
+        TestT IO (List UInt8) :=
+      match reader input with
+      | .ok (got, rest) => do
+        ensure (s.accepts t) "the reader read past the end, or past a failed requirement"
+        got === want
+        pure rest
+      | .error () => do
+        ensure (!s.accepts t) "the reader refused a field that is there"
+        pure input
+    match t with
+    | .bytes n => run (ByteReader.bytes () n) field
+    | .uint n => run (ByteReader.uint () n) (bytesToNat field)
+    | .require holds => run (ByteReader.require (holds = true) ()) ()
+  invariants input s := input === s.data.drop s.pos
+
+/-! ## A stream of values, as commands -/
+
+/-- A value written to the stream, as it must read back. -/
+inductive Item where
+  | be (len n : Nat)
+  | le (len n : Nat)
+  | hex (bytes : List UInt8)
+  | base64 (bytes : List UInt8)
+  deriving Repr, BEq
+
+/-- The stream written so far and not yet read, and the values it holds in order. -/
+structure Stream where
+  bytes : List UInt8 := []
+  pending : List Item := []
+  deriving Repr, Inhabited
+
+/-- Text as the bytes of the stream, behind its length in one byte. -/
+def framed (text : String) : List UInt8 :=
+  UInt8.ofNat text.utf8ByteSize :: text.toUTF8.toList
+
+/-- Write a big-endian number. -/
+structure PutBE where
+  len : Nat
+  n : Nat
+
+instance : Command PutBE Stream Unit IO where
+  apply c s := pure { bytes := s.bytes ++ natToBytes c.len c.n, pending := s.pending ++ [.be c.len c.n] }
+  label c := s!"PUT_BE({c.len}, {c.n})"
+  build _ := do
+    let len ← Gen.nat (.constant 0 33)
+    PutBE.mk len <$> genNatBits (8 * len)
+
+/-- Write a little-endian number. -/
+structure PutLE where
+  len : Nat
+  n : Nat
+
+instance : Command PutLE Stream Unit IO where
+  apply c s := pure { bytes := s.bytes ++ (uintToBytes c.len c.n).toList,
+                      pending := s.pending ++ [.le c.len c.n] }
+  label c := s!"PUT_LE({c.len}, {c.n})"
+  build _ := do
+    let len ← Gen.nat (.constant 0 33)
+    PutLE.mk len <$> genNatBits (8 * len)
+
+/-- Write bytes as hexadecimal text. -/
+structure PutHex where
+  bytes : List UInt8
+
+instance : Command PutHex Stream Unit IO where
+  apply c s := pure { bytes := s.bytes ++ framed (hexString c.bytes),
+                      pending := s.pending ++ [.hex c.bytes] }
+  label c := s!"PUT_HEX({hexString c.bytes})"
+  build _ := PutHex.mk <$> genByteList (.linear 0 40)
+
+/-- Write bytes as base64 text. -/
+structure PutBase64 where
+  bytes : List UInt8
+
+instance : Command PutBase64 Stream Unit IO where
+  apply c s := pure { bytes := s.bytes ++ framed (Base64.encode ⟨c.bytes.toArray⟩),
+                      pending := s.pending ++ [.base64 c.bytes] }
+  label c := s!"PUT_BASE64({hexString c.bytes})"
+  build _ := PutBase64.mk <$> genByteList (.linear 0 40)
+
+/-- Read the oldest value back, with the reader of its kind. -/
+structure Take where
+
+/-- Read a text behind its length. -/
+def takeText : ByteReader.Reader Unit String := do
+  let len ← ByteReader.uint () 1
+  let bytes ← ByteReader.bytes () len
+  match String.fromUTF8? ⟨bytes.toArray⟩ with
+  | some text => pure text
+  | none => throw ()
+
+instance : Command Take Stream Unit IO where
+  check _ s := !s.pending.isEmpty
+  apply _ s := do
+    let item :: pending := s.pending | failWith "nothing to read"
+    let finish {α : Type} (reader : ByteReader.Reader Unit α) (holds : α → TestT IO Unit) :
+        TestT IO Stream :=
+      match reader s.bytes with
+      | .ok (got, rest) => do holds got; pure { bytes := rest, pending }
+      | .error () => failWith "the stream is short"
+    match item with
+    | .be len n => finish (ByteReader.uint () len) (· === n)
+    | .le len n => finish (ByteReader.bytes () len) fun field =>
+        if h : field.length = len then bytesToUint (⟨field.toArray, by simpa using h⟩ : Vector UInt8 len) === n
+        else failWith "the field has another length"
+    | .hex bytes => finish takeText fun text =>
+        (hexBytes? (text.toList.drop 2)).map (·.toList) === some bytes
+    | .base64 bytes => finish takeText fun text =>
+        match Base64.decode text with
+        | .ok got => got.toList === bytes
+        | .error e => failWith s!"base64 refused its own text: {repr e}"
+  label _ := "TAKE"
+  build _ := pure {}
+
+/-- A check that nothing is left behind: every value was read and the stream is empty. -/
+structure Drain where
+
+instance : Command Drain Stream Unit IO where
+  check _ s := s.pending.isEmpty
+  apply _ s := do s.bytes === []; pure s
+  label _ := "DRAIN"
+  build _ := pure {}
+
+/-- Values written in any order read back in that order, each where the last one ended. -/
+def stream (mode : Mode) : Property IO :=
+  scenario mode () [Command.gen PutBE, Command.gen PutLE, Command.gen PutHex,
+    Command.gen PutBase64, Command.gen Take, Command.gen Take, Command.gen Drain]
+
 end BaseProperty
 
 open BaseProperty in
@@ -152,5 +326,8 @@ def main (args : List String) : IO UInt32 := do
     ("two's complement of a word", signed.withTests cases),
     ("big-endian and little-endian bytes", endian.withTests cases),
     ("hexadecimal reads back", hexRoundTrip.withTests cases),
-    ("the gas limit toward a target", gasLimit.withTests cases)]
+    ("the gas limit toward a target", gasLimit.withTests cases),
+    ("state machine: the byte reader against its model", readerMachine.property.withTests cases),
+    ("commands in order: a stream of values reads back", stream .deterministic),
+    ("commands in madhouse: a stream of values reads back", (stream .madhouse).withTests cases)]
   pure (if ok then 0 else 1)
