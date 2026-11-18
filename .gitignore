@@ -25,3 +25,6 @@ build/
 .DS_Store
 .idea/
 .vscode/
+# The property tests resolve their dependencies when they first build.
+tests/property/lake-manifest.json
+tests/property/lean-toolchain

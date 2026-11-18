@@ -1,0 +1,70 @@
+# Property tests of EthLib, written with lean-hedgehog.
+# A separate package, as tests/downstream is, so EthLib gains no dependency.
+name = "EthLibProperty"
+# EthLib's dependencies are those of the repository root, already built there.
+packagesDir = "../../.lake/packages"
+defaultTargets = []
+
+[leanOptions]
+autoImplicit = false
+
+[[require]]
+name = "EthLib"
+path = "../.."
+
+# lean-hedgehog v0.1.0.
+[[require]]
+name = "hedgehog"
+git = "https://github.com/hedgehogqa/lean-hedgehog"
+rev = "86deed911bcbc16b70e429bfaa8774317b0567ee"
+
+# What every driver shares: generators, hexadecimal, the oracle process.
+[[lean_lib]]
+name = "Support"
+
+# The drivers and what they import: `Property/<Layer>.lean` and `Property/<Layer>/*.lean`.
+[[lean_lib]]
+name = "Property"
+globs = ["Property.+"]
+
+# One driver per layer of EthLib.  None is a default target:
+#     lake exe base-property [cases]
+[[lean_exe]]
+name = "base-property"
+root = "Property.Base"
+
+[[lean_exe]]
+name = "serialization-property"
+root = "Property.Serialization"
+
+[[lean_exe]]
+name = "hashes-property"
+root = "Property.Hashes"
+
+[[lean_exe]]
+name = "curves-property"
+root = "Property.Curves"
+
+[[lean_exe]]
+name = "networking-property"
+root = "Property.Networking"
+
+[[lean_exe]]
+name = "evm-property"
+root = "Property.Evm"
+
+[[lean_exe]]
+name = "execution-property"
+root = "Property.Execution"
+
+[[lean_exe]]
+name = "consensus-property"
+root = "Property.Consensus"
+
+[[lean_exe]]
+name = "forkchoice-property"
+root = "Property.ForkChoice"
+
+[[lean_exe]]
+name = "engine-property"
+root = "Property.Engine"
