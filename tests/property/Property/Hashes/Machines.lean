@@ -57,7 +57,7 @@ def hasherMachine (oracle : Oracle) : StateMachine ByteArray HashStep Hash.Kecca
     | s, .absorb chunk => s ++ chunk
     | s, .digest => s
   initSut _ := pure .empty
-  applySut h s
+  applySut h _ s
     | .absorb chunk => pure (h.absorb chunk)
     | .digest => do
       hexv h.digest === (← oracle.ask ["keccak256", hex s])
@@ -110,7 +110,7 @@ def streamMachine (oracle : Oracle) :
   preconditions s _ := !s.closed
   apply s t := { s with data := s.data ++ t.data', closed := t matches .tail _ }
   initSut s := pure (vec 16 s.counter, .empty)
-  applySut sut s t := do
+  applySut sut _ s t := do
     let (block, out) := sut
     let piece := t.data'
     pure (Nat.repeat (Aes.inc s.width) (piece.size / 16) block,
@@ -140,7 +140,7 @@ structure Seed where
   hash : ByteArray
 
 instance : Command Seed Drbg Oracle IO where
-  apply c _ := do
+  apply _ c _ := do
     let state := Rfc6979.nonceSeed c.q c.x (vec 32 c.hash)
     let (key, value) := two (← c.oracle.ask ["rfc_seed", toString c.q, toString c.x, hex c.hash])
     Drbg.agree state key value
@@ -154,8 +154,8 @@ structure Next where
   oracle : Oracle
 
 instance : Command Next Drbg Oracle IO where
-  check _ s := s.sut.isSome
-  apply c s := do
+  check _ _ s := s.sut.isSome
+  apply _ c s := do
     let some state := s.sut | failure
     let (candidate, next) := Rfc6979.nonceNext state
     let value ← c.oracle.ask ["rfc_next", hex s.key, hex s.value]
@@ -170,8 +170,8 @@ structure Reject where
   oracle : Oracle
 
 instance : Command Reject Drbg Oracle IO where
-  check _ s := s.sut.isSome
-  apply c s := do
+  check _ _ s := s.sut.isSome
+  apply _ c s := do
     let some state := s.sut | failure
     let next := Rfc6979.nonceReject state
     let (key, value) := two (← c.oracle.ask ["rfc_reject", hex s.key, hex s.value])
@@ -217,7 +217,7 @@ structure SealGcm where
   plain : ByteArray
 
 instance : Command SealGcm Session Oracle IO where
-  apply c s := do
+  apply _ c s := do
     let key := if c.wide then s.key else s.key.extract 0 16
     let got := Aes.Gcm.encrypt (aesCiph key) 16 s.nonce c.plain c.aad
     pairOf got
@@ -237,7 +237,7 @@ structure SealChaCha where
   plain : ByteArray
 
 instance : Command SealChaCha Session Oracle IO where
-  apply c s := do
+  apply _ c s := do
     let got := (ChaCha20Poly1305.encrypt (vec 32 s.key) (vec 12 s.nonce) c.aad c.plain).map
       fun (text, tag) => (text, unvec tag)
     pairOf got === (← c.oracle.ask ["aead_enc", hex s.key, hex s.nonce, hex c.aad, hex c.plain])
@@ -265,8 +265,8 @@ structure Open where
   index : Nat
 
 instance : Command Open Session Oracle IO where
-  check _ s := !s.packets.isEmpty
-  apply c s := do
+  check _ _ s := !s.packets.isEmpty
+  apply _ c s := do
     let i := c.index % s.packets.length
     let some p := s.packets[i]? | failure
     let (got, expected) ← openPacket c.oracle p
@@ -284,8 +284,8 @@ structure OpenTampered where
   bit : Nat
 
 instance : Command OpenTampered Session Oracle IO where
-  check _ s := !s.packets.isEmpty
-  apply c s := do
+  check _ _ s := !s.packets.isEmpty
+  apply _ c s := do
     let some p := s.packets[c.index % s.packets.length]? | failure
     let p := match c.tamper with
       | .tag => { p with tag := flipBit p.tag c.bit }
@@ -308,7 +308,7 @@ structure Rekey where
   number : Nat
 
 instance : Command Rekey Session Oracle IO where
-  apply c s := pure { s with key := c.key, number := c.number }
+  apply _ c s := pure { s with key := c.key, number := c.number }
   label c := s!"REKEY({hex c.key}, {c.number})"
   build _ := do
     let top ← Gen.element [2 ^ 8, 2 ^ 32, 2 ^ 64, 2 ^ 96]

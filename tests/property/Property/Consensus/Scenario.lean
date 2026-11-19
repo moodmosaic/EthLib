@@ -97,8 +97,8 @@ structure VoluntaryExitCommand (fork : Fork) where
   call : Invocation fork
 
 instance {fork : Fork} : Command (VoluntaryExitCommand fork) (Chain fork) (Env fork) IO where
-  check c _ := c.call.available
-  apply c := c.call.apply
+  check _ c _ := c.call.available
+  apply _ c := c.call.apply
   label c := c.call.label
   build env := VoluntaryExitCommand.mk <$> Invocation.build "process_voluntary_exit" env
 
@@ -107,8 +107,8 @@ structure ProposerSlashingCommand (fork : Fork) where
   call : Invocation fork
 
 instance {fork : Fork} : Command (ProposerSlashingCommand fork) (Chain fork) (Env fork) IO where
-  check c _ := c.call.available
-  apply c := c.call.apply
+  check _ c _ := c.call.available
+  apply _ c := c.call.apply
   label c := c.call.label
   build env := ProposerSlashingCommand.mk <$> Invocation.build "process_proposer_slashing" env
 
@@ -117,8 +117,8 @@ structure AttesterSlashingCommand (fork : Fork) where
   call : Invocation fork
 
 instance {fork : Fork} : Command (AttesterSlashingCommand fork) (Chain fork) (Env fork) IO where
-  check c _ := c.call.available
-  apply c := c.call.apply
+  check _ c _ := c.call.available
+  apply _ c := c.call.apply
   label c := c.call.label
   build env := AttesterSlashingCommand.mk <$> Invocation.build "process_attester_slashing" env
 
@@ -127,8 +127,8 @@ structure AttestationCommand (fork : Fork) where
   call : Invocation fork
 
 instance {fork : Fork} : Command (AttestationCommand fork) (Chain fork) (Env fork) IO where
-  check c _ := c.call.available
-  apply c := c.call.apply
+  check _ c _ := c.call.available
+  apply _ c := c.call.apply
   label c := c.call.label
   build env := AttestationCommand.mk <$> Invocation.build "process_attestation" env
 
@@ -137,8 +137,8 @@ structure BlsChangeCommand (fork : Fork) where
   call : Invocation fork
 
 instance {fork : Fork} : Command (BlsChangeCommand fork) (Chain fork) (Env fork) IO where
-  check c _ := c.call.available
-  apply c := c.call.apply
+  check _ c _ := c.call.available
+  apply _ c := c.call.apply
   label c := c.call.label
   build env := BlsChangeCommand.mk <$> Invocation.build "process_bls_to_execution_change" env
 
@@ -147,8 +147,8 @@ structure DepositCommand (fork : Fork) where
   call : Invocation fork
 
 instance {fork : Fork} : Command (DepositCommand fork) (Chain fork) (Env fork) IO where
-  check c _ := c.call.available
-  apply c := c.call.apply
+  check _ c _ := c.call.available
+  apply _ c := c.call.apply
   label c := c.call.label
   build env := DepositCommand.mk <$> Invocation.build "process_deposit" env
 
@@ -157,8 +157,8 @@ structure DepositRequestCommand (fork : Fork) where
   call : Invocation fork
 
 instance {fork : Fork} : Command (DepositRequestCommand fork) (Chain fork) (Env fork) IO where
-  check c _ := c.call.available
-  apply c := c.call.apply
+  check _ c _ := c.call.available
+  apply _ c := c.call.apply
   label c := c.call.label
   build env := DepositRequestCommand.mk <$> Invocation.build "process_deposit_request" env
 
@@ -167,8 +167,8 @@ structure WithdrawalRequestCommand (fork : Fork) where
   call : Invocation fork
 
 instance {fork : Fork} : Command (WithdrawalRequestCommand fork) (Chain fork) (Env fork) IO where
-  check c _ := c.call.available
-  apply c := c.call.apply
+  check _ c _ := c.call.available
+  apply _ c := c.call.apply
   label c := c.call.label
   build env := WithdrawalRequestCommand.mk <$> Invocation.build "process_withdrawal_request" env
 
@@ -178,8 +178,8 @@ structure ConsolidationRequestCommand (fork : Fork) where
 
 instance {fork : Fork} :
     Command (ConsolidationRequestCommand fork) (Chain fork) (Env fork) IO where
-  check c _ := c.call.available
-  apply c := c.call.apply
+  check _ c _ := c.call.available
+  apply _ c := c.call.apply
   label c := c.call.label
   build env :=
     ConsolidationRequestCommand.mk <$> Invocation.build "process_consolidation_request" env
@@ -189,8 +189,8 @@ structure SyncAggregateCommand (fork : Fork) where
   call : Invocation fork
 
 instance {fork : Fork} : Command (SyncAggregateCommand fork) (Chain fork) (Env fork) IO where
-  check c _ := c.call.available
-  apply c := c.call.apply
+  check _ c _ := c.call.available
+  apply _ c := c.call.apply
   label c := c.call.label
   build env := SyncAggregateCommand.mk <$> Invocation.build "process_sync_aggregate" env
 
@@ -199,8 +199,8 @@ structure WithdrawalsCommand (fork : Fork) where
   call : Invocation fork
 
 instance {fork : Fork} : Command (WithdrawalsCommand fork) (Chain fork) (Env fork) IO where
-  check c _ := c.call.available
-  apply c := c.call.apply
+  check _ c _ := c.call.available
+  apply _ c := c.call.apply
   label c := c.call.label
   build env := WithdrawalsCommand.mk <$> Invocation.build "process_withdrawals" env
 
@@ -209,8 +209,8 @@ structure BuilderDepositCommand (fork : Fork) where
   call : Invocation fork
 
 instance {fork : Fork} : Command (BuilderDepositCommand fork) (Chain fork) (Env fork) IO where
-  check c _ := c.call.available
-  apply c := c.call.apply
+  check _ c _ := c.call.available
+  apply _ c := c.call.apply
   label c := c.call.label
   build env :=
     BuilderDepositCommand.mk <$> Invocation.build "process_builder_deposit_request" env
@@ -230,15 +230,15 @@ def BuilderExitCommand.leaving {fork : Fork} (c : BuilderExitCommand fork) : Opt
   | _ => none
 
 instance {fork : Fork} : Command (BuilderExitCommand fork) (Chain fork) (Env fork) IO where
-  check c _ := c.call.available
-  apply c chain := do
+  check _ c _ := c.call.available
+  apply _ c chain := do
     let after ← c.call.apply chain
     -- A scenario whose requests all do nothing does not test the exit of a builder.
     cover 5 "a builder exit took effect" (after.bytes c.call.env != chain.bytes c.call.env)
     pure after
   label c := c.call.label
   build env := BuilderExitCommand.mk <$> Invocation.build "process_builder_exit_request" env
-  next c chain := { chain with staying := chain.staying.filter (some · != c.leaving) }
+  next _ c chain := { chain with staying := chain.staying.filter (some · != c.leaving) }
   buildIn env chain :=
     let blind := BuilderExitCommand.mk <$> Invocation.build "process_builder_exit_request" env
     if chain.staying.isEmpty then blind
@@ -252,8 +252,8 @@ structure SlotsCommand (fork : Fork) where
   call : Invocation fork
 
 instance {fork : Fork} : Command (SlotsCommand fork) (Chain fork) (Env fork) IO where
-  check c _ := c.call.available
-  apply c := c.call.apply
+  check _ c _ := c.call.available
+  apply _ c := c.call.apply
   label c := c.call.label
   build env := SlotsCommand.mk <$> Invocation.build "process_slots" env
 

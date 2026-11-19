@@ -158,7 +158,7 @@ def yamux : StateMachine YModel YFrame (Yamux.Session × Yamux.Session) IO where
   transitions := genYFrame
   apply := yApply
   initSut _ := pure ({ isClient := true }, { isClient := false })
-  applySut sut _ f := do
+  applySut sut _ _ f := do
     let (client, server) := sut
     let frame := f.frame
     let (sender, receiver) := if f.fromClient then (client, server) else (server, client)
@@ -288,7 +288,7 @@ def mplex : StateMachine MModel MFrame (Mplex.Streams × Mplex.Streams) IO where
   transitions := genMFrame
   apply := mApply
   initSut _ := pure ([], [])
-  applySut sut _ f := do
+  applySut sut _ _ f := do
     let (client, server) := sut
     let (sender, receiver) := if f.fromClient then (client, server) else (server, client)
     match Mplex.send sender f.frame, Mplex.receive receiver f.frame with
@@ -358,7 +358,7 @@ def rlpxFrames : StateMachine FrameModel FrameStep FrameSut IO where
     let a := { m.session with initiator := true }.secrets
     let b := { m.session with initiator := false }.secrets
     pure ⟨a.egress, b.ingress, b.egress, a.ingress, [], []⟩
-  applySut sut _ step := do
+  applySut sut _ _ step := do
     let (initiator, data) := match step with
       | .send i d | .corrupt i d _ | .cut i d _ => (i, d)
     let (out, in_) := if initiator then (sut.initiatorOut, sut.recipientIn)

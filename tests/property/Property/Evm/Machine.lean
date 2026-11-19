@@ -165,7 +165,7 @@ After each step the gas left, the refund counter and the four words are the mode
 def storageMachine : StateMachine StorageModel StorageStep (Σ fork, StorageSut fork) IO where
   toModel := storageModel
   initSut m := pure ⟨m.fork, storageFrame m, false⟩
-  applySut sut _ t := do
+  applySut sut _ _ t := do
     let ⟨fork, sut⟩ := sut
     let code : ByteArray := match t with
       | .sload key => ⟨#[0x60, UInt8.ofNat key, 0x54]⟩
@@ -275,7 +275,7 @@ def deepStackMachine : StateMachine DeepStack DeepStep (Evm .glamsterdam Nat × 
       | .ok next => next
       | .error _ => stack
     pure ({ frame with stack }, false)
-  applySut sut _ t := do
+  applySut sut _ _ t := do
     match runCode sut.1 t.code with
     | .error e =>
       annotate s!"EthLib refuses with {reprStr e}"
@@ -395,10 +395,10 @@ def leavesWord (byte : UInt8) : Bool :=
     [0x20, 0x35, 0x51, 0x59, 0x54, 0x5c]).contains byte
 
 instance {family : String} : Command (FrameCommand family) FrameState FrameContext IO where
-  apply c s := stepBoth c.ctx c.code s
+  apply _ c s := stepBoth c.ctx c.code s
   label c := s!"{c.name} [{hex c.code}]"
   build ctx := buildFrameCommand family (familyBytes family) ctx
-  next c s :=
+  next _ c s :=
     let byte := c.code.data.back?.getD 0
     if leavesWord byte then { s with depth := s.depth + 1 } else s
 
@@ -408,17 +408,17 @@ structure StackCommand where
   byte : UInt8
 
 instance : Command StackCommand FrameState FrameContext IO where
-  check c s :=
+  check _ c s :=
     let depth := (s.frame.map (·.2.stack.val.length)).getD 0
     let n := c.byte.toNat % 16
     -- One command in the family reaches one past the stack, to see the underflow.
     if c.byte ≥ 0x90 then n + 1 ≤ depth else n ≤ depth
-  apply c s := do
+  apply _ c s := do
     cover c.ctx.minimum "a DUP or SWAP ran" true
     stepBoth c.ctx ⟨#[c.byte]⟩ s
   label c := s!"{if c.byte ≥ 0x90 then "SWAP" else "DUP"}{c.byte.toNat % 16 + 1}"
   build ctx := StackCommand.mk ctx <$> Gen.integral (.constant 0x80 0x9f)
-  next c s := if c.byte ≥ 0x90 then s else { s with depth := s.depth + 1 }
+  next _ c s := if c.byte ≥ 0x90 then s else { s with depth := s.depth + 1 }
   -- Mostly an instruction that the stack can serve.
   --
   -- That is DUP1 to DUP of the depth, and SWAP1 to SWAP of one less.

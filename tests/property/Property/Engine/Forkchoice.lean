@@ -229,7 +229,7 @@ def Answer.status : Answer → Option PayloadStatus
 def forkchoiceMachine : StateMachine ForkchoiceModel ForkchoiceStep ForkchoiceSut IO where
   toModel := forkchoiceModel
   initSut _ := pure {}
-  applySut sut m
+  applySut sut _ m
     | .add block =>
       -- The model holds the block already, so its validity with its ancestors can be read.
       let known : KnownPayload := {

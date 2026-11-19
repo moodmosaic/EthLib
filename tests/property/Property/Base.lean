@@ -188,7 +188,7 @@ def readerModel : Model ReaderModel Read where
 def readerMachine : StateMachine ReaderModel Read (List UInt8) IO where
   toModel := readerModel
   initSut s := pure s.data
-  applySut input s t := do
+  applySut input _ s t := do
     let field := (s.data.drop s.before).take t.width
     let run {α : Type} [BEq α] [Repr α] (reader : ByteReader.Reader Unit α) (want : α) :
         TestT IO (List UInt8) :=
@@ -232,7 +232,7 @@ structure PutBE where
   n : Nat
 
 instance : Command PutBE Stream Unit IO where
-  apply c s :=
+  apply _ c s :=
     pure { bytes := s.bytes ++ natToBytes c.len c.n, pending := s.pending ++ [.be c.len c.n] }
   label c := s!"PUT_BE({c.len}, {c.n})"
   build _ := do
@@ -245,8 +245,8 @@ structure PutLE where
   n : Nat
 
 instance : Command PutLE Stream Unit IO where
-  apply c s := pure { bytes := s.bytes ++ (uintToBytes c.len c.n).toList,
-                      pending := s.pending ++ [.le c.len c.n] }
+  apply _ c s := pure { bytes := s.bytes ++ (uintToBytes c.len c.n).toList,
+                        pending := s.pending ++ [.le c.len c.n] }
   label c := s!"PUT_LE({c.len}, {c.n})"
   build _ := do
     let len ← Gen.nat (.constant 0 33)
@@ -257,8 +257,8 @@ structure PutHex where
   bytes : List UInt8
 
 instance : Command PutHex Stream Unit IO where
-  apply c s := pure { bytes := s.bytes ++ framed (hexString c.bytes),
-                      pending := s.pending ++ [.hex c.bytes] }
+  apply _ c s := pure { bytes := s.bytes ++ framed (hexString c.bytes),
+                        pending := s.pending ++ [.hex c.bytes] }
   label c := s!"PUT_HEX({hexString c.bytes})"
   build _ := PutHex.mk <$> genByteList (.linear 0 40)
 
@@ -267,8 +267,8 @@ structure PutBase64 where
   bytes : List UInt8
 
 instance : Command PutBase64 Stream Unit IO where
-  apply c s := pure { bytes := s.bytes ++ framed (Base64.encode ⟨c.bytes.toArray⟩),
-                      pending := s.pending ++ [.base64 c.bytes] }
+  apply _ c s := pure { bytes := s.bytes ++ framed (Base64.encode ⟨c.bytes.toArray⟩),
+                        pending := s.pending ++ [.base64 c.bytes] }
   label c := s!"PUT_BASE64({hexString c.bytes})"
   build _ := PutBase64.mk <$> genByteList (.linear 0 40)
 
@@ -284,8 +284,8 @@ def takeText : ByteReader.Reader Unit String := do
   | none => throw ()
 
 instance : Command Take Stream Unit IO where
-  check _ s := !s.pending.isEmpty
-  apply _ s := do
+  check _ _ s := !s.pending.isEmpty
+  apply _ _ s := do
     let item :: pending := s.pending | failWith "nothing to read"
     let finish {α : Type} (reader : ByteReader.Reader Unit α) (holds : α → TestT IO Unit) :
         TestT IO Stream :=
@@ -311,8 +311,8 @@ instance : Command Take Stream Unit IO where
 structure Drain where
 
 instance : Command Drain Stream Unit IO where
-  check _ s := s.pending.isEmpty
-  apply _ s := do s.bytes === []; pure s
+  check _ _ s := s.pending.isEmpty
+  apply _ _ s := do s.bytes === []; pure s
   label _ := "DRAIN"
   build _ := pure {}
 

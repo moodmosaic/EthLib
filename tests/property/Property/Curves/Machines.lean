@@ -60,7 +60,7 @@ def accumulator (oracle : Oracle) : StateMachine Nat Step Bls.G1 IO where
     | .cancel => 0
     | .reencode => s
   initSut s := pure (Bls.G1.mulNat Bls.G1.generator s)
-  applySut acc _ t := do
+  applySut acc _ _ t := do
     let g := Bls.G1.generator
     let spread (pt : Bls.G1) : Bls.G1 :=
       Bls.G1.add (Bls.G1.double (Bls.G1.double pt)) (Bls.G1.neg (Bls.G1.add (Bls.G1.double pt) pt))
@@ -113,7 +113,7 @@ def nonces (oracle : Oracle) :
   preconditions s t := (s.taken.head? == some .next) == (t == .reject)
   apply s t := { s with taken := t :: s.taken }
   initSut s := pure (Rfc6979.nonceSeed Secp256k1.Fn.modulus s.key (vec32 s.hash), [])
-  applySut sut _ t :=
+  applySut sut _ _ t :=
     match t with
     | .next =>
       let (candidate, state) := Rfc6979.nonceNext sut.1
@@ -156,8 +156,8 @@ def register (oracle : Oracle) (key : Nat) (s : Signers) : TestT IO Signers := d
   pure { s with keys := s.keys.push key }
 
 instance : Command Register Signers Oracle IO where
-  check c s := !s.keys.contains c.key && s.keys.size < 5
-  apply c s := register c.oracle c.key s
+  check _ c s := !s.keys.contains c.key && s.keys.size < 5
+  apply _ c s := register c.oracle c.key s
   label c := s!"REGISTER({c.key})"
   build oracle := Register.mk oracle <$>
     Gen.frequency [(1, Gen.nat (.constant 1 3)), (2, genScalar r)]
@@ -168,9 +168,9 @@ structure RegisterOpposite where
   pick : Nat
 
 instance : Command RegisterOpposite Signers Oracle IO where
-  check c s := !s.keys.isEmpty && s.keys.size < 5 &&
+  check _ c s := !s.keys.isEmpty && s.keys.size < 5 &&
     !s.keys.contains (r - s.keys[c.pick % s.keys.size]!)
-  apply c s := register c.oracle (r - s.keys[c.pick % s.keys.size]!) s
+  apply _ c s := register c.oracle (r - s.keys[c.pick % s.keys.size]!) s
   label c := s!"REGISTER_OPPOSITE({c.pick})"
   build oracle := RegisterOpposite.mk oracle <$> Gen.nat (.constant 0 4)
 
@@ -181,8 +181,8 @@ structure Sign where
   msg : ByteArray
 
 instance : Command Sign Signers Oracle IO where
-  check _ s := !s.keys.isEmpty && s.made.size < 6
-  apply c s := do
+  check _ _ s := !s.keys.isEmpty && s.made.size < 6
+  apply _ c s := do
     let index := c.pick % s.keys.size
     let key := s.keys[index]!
     let sig := sigOf key c.msg
@@ -206,8 +206,8 @@ structure Tamper where
   place : Nat
 
 instance : Command Tamper Signers Oracle IO where
-  check _ s := !s.made.isEmpty
-  apply c s := do
+  check _ _ s := !s.made.isEmpty
+  apply _ c s := do
     let (index, msg, sig) := s.made[c.pick % s.made.size]!
     let pk := pkOf s.keys[index]!
     let other := pkOf s.keys[(index + 1) % s.keys.size]!
@@ -238,8 +238,8 @@ structure AggregateSame where
   msg : ByteArray
 
 instance : Command AggregateSame Signers Oracle IO where
-  check _ s := !s.keys.isEmpty
-  apply c s := do
+  check _ _ s := !s.keys.isEmpty
+  apply _ c s := do
     let keys := s.keys.toList
     let pks := keys.map pkOf
     let sig := aggregateOf keys (keys.map fun _ => c.msg)
@@ -267,8 +267,8 @@ structure AggregateMade where
   oracle : Oracle
 
 instance : Command AggregateMade Signers Oracle IO where
-  check _ s := !s.made.isEmpty
-  apply c s := do
+  check _ _ s := !s.made.isEmpty
+  apply _ c s := do
     let made := s.made.toList
     let pks := made.map fun (index, _, _) => pkOf s.keys[index]!
     let msgs := made.map (·.2.1)
@@ -289,7 +289,7 @@ structure EmptySet where
   msg : ByteArray
 
 instance : Command EmptySet Signers Oracle IO where
-  apply c s := do
+  apply _ c s := do
     ensure (ethFastAggregateVerify #[] c.msg G2_POINT_AT_INFINITY) "the empty set is refused"
     ensure (!fastAggregateVerify #[] c.msg G2_POINT_AT_INFINITY) "the draft takes an empty set"
     ensure (!aggregateVerify #[] #[] G2_POINT_AT_INFINITY) "an empty aggregate verifies"
@@ -335,8 +335,8 @@ structure AddBlob where
   spec : BlobSpec
 
 instance : Command AddBlob Store Env IO where
-  check _ s := s.blobs.size < 3
-  apply c s := do
+  check _ _ s := s.blobs.size < 3
+  apply _ c s := do
     let blob := c.spec.blob
     let .ok commitment := blobToKzgCommitment c.env.setup blob | failWith "no commitment"
     let .ok proof := computeBlobKzgProof c.env.setup blob commitment | failWith "no proof"
@@ -356,7 +356,7 @@ structure VerifyAll where
   swap : Bool
 
 instance : Command VerifyAll Store Env IO where
-  apply c s := do
+  apply _ c s := do
     let blobs := s.blobs.map (·.spec.blob)
     let commitments := s.blobs.map (·.commitment)
     let proofs := s.blobs.map (·.proof)
@@ -381,8 +381,8 @@ structure Sample where
   move : Bool
 
 instance : Command Sample Store Env IO where
-  check _ s := !s.blobs.isEmpty
-  apply c s := do
+  check _ _ s := !s.blobs.isEmpty
+  apply _ c s := do
     let rows := c.picks.map fun (b, i) =>
       let stored := s.blobs[b % s.blobs.size]!
       (stored.commitment, i, stored.cells[i]!, stored.proofs[i]!)
@@ -413,8 +413,8 @@ structure LoseAndRecover where
   kept : List Nat
 
 instance : Command LoseAndRecover Store Env IO where
-  check _ s := !s.blobs.isEmpty
-  apply c s := do
+  check _ _ s := !s.blobs.isEmpty
+  apply _ c s := do
     let stored := s.blobs[c.pick % s.blobs.size]!
     let cells := c.kept.map fun i => stored.cells[i]!
     match recoverCellsAndKzgProofs c.env.setup c.kept.toArray cells.toArray with
@@ -438,8 +438,8 @@ structure OpenPoint where
   z : Nat
 
 instance : Command OpenPoint Store Env IO where
-  check _ s := !s.blobs.isEmpty
-  apply c s := do
+  check _ _ s := !s.blobs.isEmpty
+  apply _ c s := do
     let stored := s.blobs[c.pick % s.blobs.size]!
     let z := vec32 (c.z % KzgTest.r)
     let .ok (proof, y) := computeKzgProof c.env.setup stored.spec.blob z | failWith "no proof"

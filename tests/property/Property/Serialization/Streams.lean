@@ -69,7 +69,7 @@ A read of the last item from a buffer one byte short is refused. -/
 def streamMachine : StateMachine StreamModel StreamStep Stream IO where
   toModel := streamModel
   initSut _ := pure ⟨.empty, 0⟩
-  applySut sut s step := do
+  applySut sut _ s step := do
     match step with
     | .write item =>
       match Rlp.encode item with
@@ -135,7 +135,7 @@ def appendRecord (s : FileState) (type : UInt16) (data : ByteArray) : TestT IO F
 structure AppendVersion where
 
 instance : Command AppendVersion FileState Oracle IO where
-  apply _ s := appendRecord s E2store.VERSION .empty
+  apply _ _ s := appendRecord s E2store.VERSION .empty
   label _ := "VERSION"
   build _ := pure {}
 
@@ -145,7 +145,7 @@ structure AppendRecord where
   data : ByteArray
 
 instance : Command AppendRecord FileState Oracle IO where
-  apply c s := appendRecord s c.type c.data
+  apply _ c s := appendRecord s c.type c.data
   label c := s!"RECORD({c.type}, {hex c.data})"
   build _ := Gen.zipWith AppendRecord.mk
     (Gen.frequency [(3, Gen.element [0x0100, 0x0300, 0x6932, 0x0000, 0xffff, 0x3265]),
@@ -163,7 +163,7 @@ structure AppendIndex where
   offsets : List Int
 
 instance : Command AppendIndex FileState Oracle IO where
-  apply c s := do
+  apply _ c s := do
     let data : ByteArray := ⟨(int64Bytes c.start ++ c.offsets.flatMap int64Bytes ++
       int64Bytes c.offsets.length).toArray⟩
     E2store.readIndex data === .ok ⟨c.start, c.offsets⟩
@@ -188,7 +188,7 @@ structure CheckFile where
   oracle : Oracle
 
 instance : Command CheckFile FileState Oracle IO where
-  apply c s := do
+  apply _ c s := do
     let records := s.records.toList
     decodedText (E2store.decode s.bytes) === recordsText records
     decodedText (E2store.decode s.bytes) === (← c.oracle.ask ["e2s", hex s.bytes])
@@ -219,8 +219,8 @@ structure CutFile where
   cut : Nat
 
 instance : Command CutFile FileState Oracle IO where
-  check c s := c.cut ≤ s.bytes.size
-  apply c s := do
+  check _ c s := c.cut ≤ s.bytes.size
+  apply _ c s := do
     let kept := s.bytes.extract 0 (s.bytes.size - c.cut)
     let result := E2store.decode kept
     annotate s!"the file of {s.bytes.size} bytes cut to {kept.size}"
@@ -239,8 +239,8 @@ structure SetReserved where
   byte : UInt8
 
 instance : Command SetReserved FileState Oracle IO where
-  check c s := c.record < s.records.size
-  apply c s := do
+  check _ c s := c.record < s.records.size
+  apply _ c s := do
     let start := (boundaries s.records.toList).getD c.record 0
     let spot := start + (if c.second then 7 else 6)
     let bad := s.bytes.set! spot c.byte

@@ -503,6 +503,6 @@ def machine (fork : Fork) (forkName : String) (oracle : Oracle) (loose : Bool :=
     StateMachine Shape Cmd (Sut fork) IO where
   toModel := model forkName loose
   initSut := initSut fork oracle
-  applySut := applySut
+  applySut := fun sut _ after cmd => applySut sut after cmd
 
 end ForkChoiceProperty

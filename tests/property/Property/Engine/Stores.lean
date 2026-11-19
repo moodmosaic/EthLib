@@ -177,7 +177,7 @@ def bodiesWord {α : Type} (toJson : α → Json) : Except EngineError α → St
 def bodyMachine : StateMachine BodyModel BodyStep (Array (Option StoredBody)) IO where
   toModel := bodyModel
   initSut m := pure (m.chain.map fun b => some b.stored)
-  applySut sut m
+  applySut sut _ m
     | .append body => pure (sut.push (some body.stored))
     | .prune n => pure (sut.set! n none)
     | .pruneList n => pure (sut.modify n (·.map fun b =>

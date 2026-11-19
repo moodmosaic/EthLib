@@ -98,7 +98,7 @@ def popCount (n : Nat) : Nat := (List.range 64).countP n.testBit
 def treeMachine (oracle : Oracle) : StateMachine TreeModel TreeStep DepositTree IO where
   toModel := treeModel
   initSut _ := pure DepositTree.new
-  applySut tree s step := do
+  applySut tree _ s step := do
     match step with
     | .push leaf =>
       match tree.pushLeaf (leafOf leaf) with

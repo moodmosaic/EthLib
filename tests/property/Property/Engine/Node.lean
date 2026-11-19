@@ -159,7 +159,7 @@ instance : Command NewPayloadCmd Node Oracle IO where
     let seeds ← Gen.list (.singleton 4) genHash
     let requests ← genRequests
     pure { oracle, parent, delta, origin, shift, txs, hashDamage, ownValid, seeds, requests }
-  apply c node := do
+  apply _ c node := do
     let parent := c.parent.bind node.pick
     let parentBlock := parent.bind (node.model.blocks[·]?)
     let number := (parentBlock.map (·.number + 1)).getD 10
@@ -284,7 +284,7 @@ instance : Command ForkchoiceCmd Node Oracle IO where
     let attributes ← Gen.frequency [(2, pure none), (5, some <$> spec)]
     let (shift, requests) ← Gen.zip genShift genRequests
     pure { oracle, head, safe, finalized, attributes, shift, requests }
-  apply c node := do
+  apply _ c node := do
     let head := node.resolve none c.head
     let headIndex := match head with
       | .known i => some i
@@ -407,7 +407,7 @@ instance : Command GetPayloadCmd Node Oracle IO where
     let build ← Gen.frequency [(10, some <$> Gen.nat (.linear 0 5)), (1, pure none)]
     let shift ← Gen.frequency [(6, pure 0), (1, pure (-1)), (1, pure 1), (1, pure (-2))]
     pure { build, shift }
-  apply c node := do
+  apply _ c node := do
     let build := c.build.bind fun selector =>
       if node.builds.isEmpty then none else node.builds[selector % node.builds.length]?
     let id : PayloadId := (build.map (·.id)).getD (Vector.replicate 8 0xee)

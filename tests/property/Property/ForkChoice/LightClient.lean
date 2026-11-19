@@ -137,7 +137,7 @@ instance {fork : Fork} : Command (Update fork) (World fork) Context IO where
     let mutation ← Gen.frequency [(5, pure 0), (2, Gen.nat (.constant 1 7))]
     let early ← Gen.frequency [(7, pure false), (1, pure true)]
     pure { context, attested, signatureDelay, finalizedBelow, committee, signers, mutation, early }
-  apply u world := do
+  apply _ u world := do
     let (store, world) ← ready u.context.1 u.context.2 world
     -- The clock reaches the signature slot, unless the update comes early.
     let world := if u.early then world
@@ -179,7 +179,7 @@ instance {fork : Fork} : Command (Force fork) (World fork) Context IO where
       (3, Gen.element [53, 54, 55, 63, 64, 65]),
       (1, Gen.nat (.linear 0 200))]
     pure { context, slots }
-  apply f world := do
+  apply _ f world := do
     let (store, world) ← ready f.context.1 f.context.2 world
     let world := { world with now := world.now + f.slots }
     let words ← evalIO (askWords f.context.2 ["lc_force", toString world.now])

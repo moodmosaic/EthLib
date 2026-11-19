@@ -327,7 +327,7 @@ def machine : StateMachine Book Op World IO where
   transitions := genOp
   apply := Book.apply
   initSut _ := pure {}
-  applySut world after op := do
+  applySut world _ after op := do
     let next ← step world op
     -- The model that the driver ran is the model that the step ran.
     ensure (reprStr next.book == reprStr after) "the two runs of the model differ"
@@ -340,7 +340,7 @@ structure SignBlock where
   new : BlockRec
 
 instance : Command SignBlock World Unit IO where
-  apply command world := step world (.block command.new)
+  apply _ command world := step world (.block command.new)
   label command := s!"SIGN_BLOCK(key {command.new.key}, slot {command.new.slot}, " ++
     s!"variant {command.new.variant.getD 0})"
   build _ := SignBlock.mk <$> genBlock []
@@ -350,7 +350,7 @@ structure SignVote where
   new : VoteRec
 
 instance : Command SignVote World Unit IO where
-  apply command world := step world (.vote command.new)
+  apply _ command world := step world (.vote command.new)
   label command := s!"SIGN_VOTE(key {command.new.key}, {command.new.source} -> " ++
     s!"{command.new.target}, variant {command.new.variant.getD 0})"
   build _ := SignVote.mk <$> genVote []
@@ -362,7 +362,7 @@ structure ImportFile where
   grouped : Bool
 
 instance : Command ImportFile World Unit IO where
-  apply command world := step world (.importFile command.blocks command.votes command.grouped)
+  apply _ command world := step world (.importFile command.blocks command.votes command.grouped)
   label command := s!"IMPORT({reprStr command.blocks}, {reprStr command.votes}, " ++
     s!"grouped {command.grouped})"
   build _ := do
@@ -373,8 +373,8 @@ instance : Command ImportFile World Unit IO where
 structure Export where
 
 instance : Command Export World Unit IO where
-  check _ world := !world.held.data.isEmpty
-  apply _ world := step world .export
+  check _ _ world := !world.held.data.isEmpty
+  apply _ _ world := step world .export
   label _ := "EXPORT"
   build _ := pure {}
 

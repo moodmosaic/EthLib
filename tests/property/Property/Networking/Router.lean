@@ -209,7 +209,7 @@ structure Tick where
   ms : Nat
 
 instance : Command Tick World Unit IO where
-  apply c w := do
+  apply _ c w := do
     let w := { w with now := w.now + c.ms }
     invariants w
     pure w
@@ -223,7 +223,7 @@ structure Subscribe where
   on : Bool
 
 instance : Command Subscribe World Unit IO where
-  apply c w := do
+  apply _ c w := do
     let (s, out) := rpc w c.peer { subscriptions := [{ subscribe := c.on, topicId := c.topic }] }
     if c.peer = 11 then ignored w s out else
     silent out
@@ -243,7 +243,7 @@ structure Receive where
   verdict : UInt8
 
 instance : Command Receive World Unit IO where
-  apply c w := do
+  apply _ c w := do
     let m := message c.topic c.key c.verdict
     let (s, out) := rpc w c.peer { publish := [m] }
     if c.peer = 11 then ignored w s out else
@@ -274,7 +274,7 @@ structure Graft where
   topic : String
 
 instance : Command Graft World Unit IO where
-  apply c w := do
+  apply _ c w := do
     let (s, out) := rpc w c.peer { control := { graft := [{ topicId := c.topic }] } }
     if c.peer = 11 then ignored w s out else
     ensure (out.forward.isEmpty && out.answers.isEmpty && out.delivered.isEmpty)
@@ -321,7 +321,7 @@ structure Prune where
   backoff : UInt64
 
 instance : Command Prune World Unit IO where
-  apply c w := do
+  apply _ c w := do
     let (s, out) := rpc w c.peer
       { control := { prune := [{ topicId := c.topic, backoff := c.backoff }] } }
     if c.peer = 11 then ignored w s out else
@@ -346,7 +346,7 @@ structure IHave where
   short : Bool
 
 instance : Command IHave World Unit IO where
-  apply c w := do
+  apply _ c w := do
     let ids := c.keys.map (fun k => (idOf k).toBytes) ++ if c.short then [⟨#[1, 2, 3]⟩] else []
     let (s, out) := rpc w c.peer
       { control := { ihave := [{ topicId := c.topic, messageIds := ids }] } }
@@ -371,7 +371,7 @@ structure IWant where
   keys : List UInt8
 
 instance : Command IWant World Unit IO where
-  apply c w := do
+  apply _ c w := do
     let ids := c.keys.map fun k => (idOf k).toBytes
     let (s, out) := rpc w c.peer { control := { iwant := [{ messageIds := ids ++ [⟨#[9]⟩] }] } }
     if c.peer = 11 then ignored w s out else
@@ -391,7 +391,7 @@ structure Join where
   topic : String
 
 instance : Command Join World Unit IO where
-  apply c w := do
+  apply _ c w := do
     let (s, out) := join params Select.first standing w.now c.topic w.router
     if w.joined.contains c.topic then
       ensure (s == w.router) "joining a joined topic changes the router"
@@ -420,7 +420,7 @@ structure Leave where
   topic : String
 
 instance : Command Leave World Unit IO where
-  apply c w := do
+  apply _ c w := do
     let (s, out) := leave (choices w.flood) w.now c.topic w.router
     if !w.joined.contains c.topic then
       ensure (s == w.router) "leaving a topic that is not joined changes the router"
@@ -444,7 +444,7 @@ structure Publish where
   key : UInt8
 
 instance : Command Publish World Unit IO where
-  apply c w := do
+  apply _ c w := do
     let m := message c.topic c.key 0
     let (s, out) := publish params (choices w.flood) Select.first standing msgId w.now m w.router
     if w.isSeen c.key then
@@ -490,7 +490,7 @@ instance : Command Publish World Unit IO where
 structure Heartbeat where
 
 instance : Command Heartbeat World Unit IO where
-  apply _ w := do
+  apply _ _ w := do
     let cs := choices w.flood
     let (s, out) := heartbeat params cs Select.first rank standing w.now w.router
     ensure (out.forward.isEmpty && out.answers.isEmpty && out.delivered.isEmpty)

@@ -338,7 +338,7 @@ A state holds no storage for an account that it does not hold. -/
 def trackerMachine : StateMachine TrackerModel Op Tracker IO where
   toModel := trackerModel
   initSut _ := pure .empty
-  applySut t m op := pure (t.step m.fork op)
+  applySut t _ m op := pure (t.step m.fork op)
   invariants t m := do
     t.reads === m.reads
     if m.stack.isEmpty && m.now == m.start then
@@ -454,97 +454,97 @@ structure CommitSnapshot extends Step
 structure EndTransaction extends Step
 
 instance : Command WriteBalance Beside BesideContext IO where
-  check c := c.allowed
-  apply c := runBeside c.ctx c.op
+  check _ c := c.allowed
+  apply _ c := runBeside c.ctx c.op
   label c := reprStr c.op
   build ctx := (fun a n => ⟨⟨ctx, .setBalance a n⟩⟩) <$> genAccountIndex <*> genAmount
 
 instance : Command BumpNonce Beside BesideContext IO where
-  check c := c.allowed
-  apply c := runBeside c.ctx c.op
+  check _ c := c.allowed
+  apply _ c := runBeside c.ctx c.op
   label c := reprStr c.op
   build ctx := (fun a => ⟨⟨ctx, .incrementNonce a⟩⟩) <$> genAccountIndex
 
 instance : Command WriteCode Beside BesideContext IO where
-  check c := c.allowed
-  apply c := runBeside c.ctx c.op
+  check _ c := c.allowed
+  apply _ c := runBeside c.ctx c.op
   label c := reprStr c.op
   build ctx := (fun a k => ⟨⟨ctx, .setCode a k⟩⟩) <$> genAccountIndex <*>
     Gen.nat (.constant 0 (codes.length - 1))
 
 instance : Command MoveEther Beside BesideContext IO where
-  check c := c.allowed
-  apply c := runBeside c.ctx c.op
+  check _ c := c.allowed
+  apply _ c := runBeside c.ctx c.op
   label c := reprStr c.op
   build ctx := (fun a b n => ⟨⟨ctx, .moveEther a b n⟩⟩) <$> genAccountIndex <*>
     genAccountIndex <*> genAmount
 
 instance : Command WriteStorage Beside BesideContext IO where
-  check c := c.allowed
-  apply c := runBeside c.ctx c.op
+  check _ c := c.allowed
+  apply _ c := runBeside c.ctx c.op
   label c := reprStr c.op
   build ctx := (fun a k v => ⟨⟨ctx, .setStorage a k v⟩⟩) <$> genAccountIndex <*>
     genSlotIndex <*> genAmount
 
 instance : Command WipeStorage Beside BesideContext IO where
-  check c := c.allowed
-  apply c := runBeside c.ctx c.op
+  check _ c := c.allowed
+  apply _ c := runBeside c.ctx c.op
   label c := reprStr c.op
   build ctx := (fun a => ⟨⟨ctx, .destroyStorage a⟩⟩) <$> genAccountIndex
 
 instance : Command DestroyAccount Beside BesideContext IO where
-  check c := c.allowed
-  apply c := runBeside c.ctx c.op
+  check _ c := c.allowed
+  apply _ c := runBeside c.ctx c.op
   label c := reprStr c.op
   build ctx := (fun a => ⟨⟨ctx, .destroyAccount a⟩⟩) <$> genAccountIndex
 
 instance : Command MarkCreated Beside BesideContext IO where
-  check c := c.allowed
-  apply c := runBeside c.ctx c.op
+  check _ c := c.allowed
+  apply _ c := runBeside c.ctx c.op
   label c := reprStr c.op
   build ctx := (fun a => ⟨⟨ctx, .markCreated a⟩⟩) <$> genAccountIndex
 
 instance : Command WriteTransient Beside BesideContext IO where
-  check c := c.allowed
-  apply c := runBeside c.ctx c.op
+  check _ c := c.allowed
+  apply _ c := runBeside c.ctx c.op
   label c := reprStr c.op
   build ctx := (fun a k v => ⟨⟨ctx, .setTransient a k v⟩⟩) <$> genAccountIndex <*>
     genSlotIndex <*> genAmount
 
 instance : Command TouchAccount Beside BesideContext IO where
-  check c := c.allowed
-  apply c := runBeside c.ctx c.op
+  check _ c := c.allowed
+  apply _ c := runBeside c.ctx c.op
   label c := reprStr c.op
   build ctx := (fun a => ⟨⟨ctx, .touch a⟩⟩) <$> genAccountIndex
 
 instance : Command SweepTouched Beside BesideContext IO where
-  check c := c.allowed
-  apply c := runBeside c.ctx c.op
+  check _ c := c.allowed
+  apply _ c := runBeside c.ctx c.op
   label c := reprStr c.op
   build ctx := (fun as => ⟨⟨ctx, .destroyTouched as⟩⟩) <$>
     Gen.subsequence (List.range addresses.length)
 
 instance : Command OpenSnapshot Beside BesideContext IO where
-  check c := c.allowed
-  apply c := runBeside c.ctx c.op
+  check _ c := c.allowed
+  apply _ c := runBeside c.ctx c.op
   label c := reprStr c.op
   build ctx := pure ⟨⟨ctx, .snapshot⟩⟩
 
 instance : Command RollBack Beside BesideContext IO where
-  check c := c.allowed
-  apply c := runBeside c.ctx c.op
+  check _ c := c.allowed
+  apply _ c := runBeside c.ctx c.op
   label c := reprStr c.op
   build ctx := pure ⟨⟨ctx, .rollback⟩⟩
 
 instance : Command CommitSnapshot Beside BesideContext IO where
-  check c := c.allowed
-  apply c := runBeside c.ctx c.op
+  check _ c := c.allowed
+  apply _ c := runBeside c.ctx c.op
   label c := reprStr c.op
   build ctx := pure ⟨⟨ctx, .commit⟩⟩
 
 instance : Command EndTransaction Beside BesideContext IO where
-  check c := c.allowed
-  apply c := runBeside c.ctx c.op
+  check _ c := c.allowed
+  apply _ c := runBeside c.ctx c.op
   label c := reprStr c.op
   build ctx := pure ⟨⟨ctx, .endTransaction⟩⟩
 

@@ -206,7 +206,7 @@ def trieMachine (oracle : Oracle) : StateMachine TrieModel TrieWrite Trie IO whe
     oracle.stdin.flush
     let _ ← oracle.stdout.getLine
     pure ⟨false, []⟩
-  applySut trie _ w := do
+  applySut trie _ _ w := do
     let trie := trieSet trie w.key w.value
     let expected ← oracle.ask ["sm_trie", "set", hex w.key, hex w.value]
     orError (hexV <$> root keccak256 trie) === expected

@@ -107,7 +107,7 @@ def listMachine (oracle : Oracle) (switch fork : Fork) (α : Type) [Element α] 
     match pushAll (RootedForkList.ofData #[] (fun _ => Nat.zero_le _)) s.numbers with
     | some list => pure list
     | none => throw (IO.userError "the first elements do not fit")
-  applySut list _ step :=
+  applySut list _ _ step :=
     match step with
     | .push number =>
       match pushAll list [number] with
@@ -173,8 +173,8 @@ structure SetWord where
   number : Nat
 
 instance : Command SetWord VectorState Oracle IO where
-  check c _ := c.index < wordCount
-  apply c s := do
+  check _ c _ := c.index < wordCount
+  apply _ c s := do
     if inside : c.index < wordCount then
       pure { s with words := s.words.set c.index (UInt64.ofNat c.number) inside,
                     wordModel := s.wordModel.set c.index c.number, writes := s.writes + 1 }
@@ -191,8 +191,8 @@ structure SetPair where
   number : Nat
 
 instance : Command SetPair VectorState Oracle IO where
-  check c _ := c.index < pairCount
-  apply c s := do
+  check _ c _ := c.index < pairCount
+  apply _ c s := do
     if inside : c.index < pairCount then
       pure { s with pairs := s.pairs.set c.index (Element.make c.number) inside,
                     pairModel := s.pairModel.set c.index c.number, writes := s.writes + 1 }
@@ -206,8 +206,8 @@ structure ShiftWords where
   fresh : List Nat
 
 instance : Command ShiftWords VectorState Oracle IO where
-  check c _ := c.fresh.length ≤ wordCount
-  apply c s := do
+  check _ c _ := c.fresh.length ≤ wordCount
+  apply _ c s := do
     let fresh : Vector UInt64 c.fresh.length :=
       Vector.ofFn fun i => UInt64.ofNat (c.fresh.getD i.val 0)
     if le : c.fresh.length ≤ wordCount then
@@ -225,8 +225,8 @@ structure ShiftPairs where
   fresh : List Nat
 
 instance : Command ShiftPairs VectorState Oracle IO where
-  check c _ := c.fresh.length ≤ pairCount
-  apply c s := do
+  check _ c _ := c.fresh.length ≤ pairCount
+  apply _ c s := do
     let fresh : Vector Pair c.fresh.length :=
       Vector.ofFn fun i => Element.make (c.fresh.getD i.val 0)
     if le : c.fresh.length ≤ pairCount then
@@ -241,7 +241,7 @@ instance : Command ShiftPairs VectorState Oracle IO where
 structure Reload where
 
 instance : Command Reload VectorState Oracle IO where
-  apply _ s := do
+  apply _ _ s := do
     match SszType.encode s.words >>= SszType.decode (α := RootedVector UInt64 wordCount),
       SszType.encode s.pairs >>= SszType.decode (α := RootedVector Pair pairCount) with
     | .ok words, .ok pairs => pure { s with words, pairs }
@@ -254,7 +254,7 @@ structure CheckRoots where
   oracle : Oracle
 
 instance : Command CheckRoots VectorState Oracle IO where
-  apply c s := do
+  apply _ c s := do
     checkVectors c.oracle s
     pure s
   label _ := "CHECK"
@@ -265,8 +265,8 @@ structure SetOutside where
   index : Nat
 
 instance : Command SetOutside VectorState Oracle IO where
-  check c _ := c.index < wordCount
-  apply _ _ := failWith "a write outside the vector ran"
+  check _ c _ := c.index < wordCount
+  apply _ _ _ := failWith "a write outside the vector ran"
   label c := s!"SET_OUTSIDE({c.index})"
   build _ := SetOutside.mk <$> Gen.nat (.constant wordCount (wordCount + 5))
 

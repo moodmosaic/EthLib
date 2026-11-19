@@ -12,11 +12,11 @@ autoImplicit = false
 name = "EthLib"
 path = "../.."
 
-# lean-hedgehog v0.2.1.
+# lean-hedgehog, the branch context-in-apply (0.3.0, unreleased).
 [[require]]
 name = "hedgehog"
 git = "https://github.com/hedgehogqa/lean-hedgehog"
-rev = "a1d3ba528062e13900bfbe311c0649619c615704"
+rev = "46a4146a3b9220b44319dd0055348ffaada0e604"
 
 # What every driver shares: generators, hexadecimal, the oracle process.
 [[lean_lib]]
