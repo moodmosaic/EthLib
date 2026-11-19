@@ -379,19 +379,24 @@ def compareAnswer (oracle : Oracle) (forkName : String) (fork : Fork) (answer : 
             failWith s!"the states after differ: {difference}"
         match run state arguments argBytes with
         | .broken why => failWith why
+        -- The report says how the cases divide: a call that is mostly refused tests little.
         | .refused why =>
+          label "refused"
           ensure (expected.startsWith "error:")
             s!"EthLib refuses ({why}), the reference answers {expected}"
           pure (some state)
         | .value text =>
+          label "a value"
           s!"val:{text}" === expected
           pure (some state)
         | .upgraded root bytes =>
+          label "upgraded"
           differ root bytes
           pure (some state)
         | .state post =>
           match SszType.hashTreeRoot post, SszType.serialize post with
           | .ok root, .ok bytes =>
+            label (if bytes == preBytes then "the state unchanged" else "the state changed")
             differ (hexVector root) bytes
             pure (some post)
           | _, _ => failWith "EthLib cannot hash or write its own state"
