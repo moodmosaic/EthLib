@@ -1,0 +1,4 @@
+# What oracle/hashes.py imports; hashlib, hmac and zlib are the standard library.
+crc32c==2.9.post0
+cryptography==50.0.2
+pycryptodome==4.5.0
