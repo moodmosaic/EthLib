@@ -16,8 +16,12 @@ import Property.Networking.Wire
     lake exe networking-property 2000
 
 Each module under `Property/Networking/` gives the properties of one part of the layer.
-The answers come from `oracle/networking.py`, from models written from the sources, and from
-state machines.
+
+The answers come from three places:
+
+- `oracle/networking.py`.
+- Models written from the sources.
+- State machines.
 -/
 
 open Hedgehog Support

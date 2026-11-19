@@ -8,12 +8,16 @@ import EthLib.Networking.Libp2p.YamuxSession
 /-!
 # Sessions as state machines: yamux, mplex and RLPx frames
 
-These are the `StateMachine` tests of the layer: the transitions are fixed by a specification,
-so they are one type, and a model written from the specification runs beside EthLib.
+These are the `StateMachine` tests of the layer.
+
+The transitions are fixed by a specification, so they are one type.
+
+A model written from the specification runs beside EthLib.
 
 A yamux or mplex connection has two ends, and EthLib keeps the table of one end.
-So the system under test is two tables, and every frame is sent by one and received by the
-other.
+
+So the system under test is two tables, and every frame is sent by one and received by the other.
+
 The model is one table of the connection, written from the source, which knows nothing of ends.
 -/
 
@@ -221,8 +225,9 @@ def MModel.find (m : MModel) (f : MFrame) : Option MStream :=
 
 /-- The stream after a frame that its writer may send, by "Protocol" of the mplex specification.
 
-A writer writes nothing after its close, nor after a reset of either end, except that it may
-reset a stream it has closed. -/
+A writer writes nothing after its close, nor after a reset of either end.
+
+The exception is that it may reset a stream it has closed. -/
 def mStep (m : MModel) (f : MFrame) : Option MStream :=
   match f.action, m.find f with
   | 0, none => some { id := f.id, clientOpened := f.fromClient }

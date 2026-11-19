@@ -4,8 +4,11 @@ import EthLib.Execution.Fees
 /-!
 # The fee functions beside the reference
 
-The base fee of EIP-1559, `fake_exponential` of EIP-4844, the blob gas price and the excess blob
-gas of each fork from Dencun, with the reserve price of EIP-7918 from Fusaka.
+The base fee of EIP-1559 and `fake_exponential` of EIP-4844.
+
+Also the blob gas price and the excess blob gas of each fork from Dencun.
+
+From Fusaka they come with the reserve price of EIP-7918.
 -/
 
 open Hedgehog Support EthLib EthLib.Base EthLib.Execution.Fees
@@ -51,8 +54,9 @@ def gasLimitRule (oracle : Oracle) : Property IO := propertyM do
     let want ← oracle.ask ["gaslimit", fork.2, toString limit, toString parent]
     (if GasLimit.checkGasLimit limit parent then "1" else "0") === want
 
-/-- `fakeExponential` is `fake_exponential` of EIP-4844, on any factor and numerator, and any
-denominator but zero. -/
+/-- `fakeExponential` is `fake_exponential` of EIP-4844.
+
+This holds on any factor and numerator, and any denominator but zero. -/
 def fakeExponential (oracle : Oracle) : Property IO := propertyM do
   let factor ← forAll (Gen.frequency [(2, pure 1), (1, Gen.nat (.exponential 0 (2 ^ 64)))])
   let denominator ← forAll (Gen.frequency [(2, Gen.element [3338477, 5007716, 8346193, 11684671]),

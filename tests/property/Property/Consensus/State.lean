@@ -7,10 +7,13 @@ import EthLib.Cryptography.Hash.Sha256
 # States of the beacon chain, described in words
 
 A generator makes a description of a state: a list of words such as `slot=23` and `v=1,0,...`.
-The oracle builds the state of the minimal preset from the words and returns its SSZ bytes, so
-the driver and the reference start from the same state, and a failure shrinks to few words.
+
+The oracle builds the state of the minimal preset from the words and returns its SSZ bytes.
+
+So the driver and the reference start from the same state, and a failure shrinks to few words.
 
 The reference then applies a function of consensus-specs, and the driver applies EthLib's.
+
 They must agree on refusal, and on the root of the state after.
 -/
 
@@ -356,6 +359,7 @@ def hexVector {n : Nat} (bytes : Vector UInt8 n) : String := hex ⟨bytes.toArra
 /-- Compare EthLib's outcome with the answer of the oracle for one state and argument.
 
 The words describe the state, and after a `|` the argument.
+
 `run` receives the state, the words of the argument, and its SSZ bytes as the oracle built it. -/
 def compareAnswer (oracle : Oracle) (forkName : String) (fork : Fork) (answer : String)
     (arguments : List String)

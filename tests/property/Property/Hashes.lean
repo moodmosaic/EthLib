@@ -7,9 +7,15 @@ import Property.Hashes.Extra
 /-!
 # Symmetric cryptography, on generated inputs
 
-Hashes, checksums, key derivation, AES and its modes, ChaCha20-Poly1305, X25519, the nonces of
-RFC 6979, ERC-2335 keystores, Ethash and the Merkle tree, each against a reference that EthLib
-did not compute (`oracle/hashes.py`) or a model written from the source text.
+Hashes, checksums, key derivation, AES and its modes, ChaCha20-Poly1305 and X25519.
+
+Also the nonces of RFC 6979, ERC-2335 keystores, Ethash and the Merkle tree.
+
+Each runs against a reference or a model.
+
+The reference is one that EthLib did not compute (`oracle/hashes.py`).
+
+The model is written from the source text.
 
     lake exe hashes-property            # 100 cases of each
     lake exe hashes-property 2000

@@ -3,11 +3,15 @@ import Property.Execution.Common
 /-!
 # Transactions as bytes, against execution-specs
 
-A transaction is generated as an RLP item, field by field, with values at the edges that the
-rules name.
-It is then changed a little, so that most inputs are almost valid.
-EthLib and the reference must agree on whether the bytes hold a transaction, and on its hash,
-its sender, its intrinsic gas, its floor and its validity.
+A transaction is generated as an RLP item, field by field.
+
+The values are at the edges that the rules name.
+
+The item is then changed a little, so that most inputs are almost valid.
+
+EthLib and the reference must agree on whether the bytes hold a transaction.
+
+They must also agree on its hash, its sender, its intrinsic gas, its floor and its validity.
 -/
 
 open Hedgehog Support EthLib EthLib.Base
@@ -195,6 +199,7 @@ def describeTx (fork : Fork) (chain : Nat) (bytes : ByteArray) : String :=
   | .error _ => "error"
   | .ok tx =>
     -- The reference types the nonce of a set code transaction on 64 bits, so it reads none above.
+    --
     -- EthLib reads it and then refuses it by EIP-2681: the same verdict, at a later step.
     if tx.type = 4 ∧ tx.nonce.toNat ≥ 2 ^ 64 then "error" else
     let hash := orError (hexV <$> transactionHash tx)
@@ -209,8 +214,11 @@ def describeTx (fork : Fork) (chain : Nat) (bytes : ByteArray) : String :=
 
 /-- EthLib and execution-specs agree on the bytes of a transaction.
 
-They agree on whether the bytes hold a transaction of the fork, and then on its hash, its sender on
-the chain, its intrinsic gas, its floor, and whether the rules that read no state accept it. -/
+They agree on whether the bytes hold a transaction of the fork.
+
+Then they agree on its hash, its sender on the chain, its intrinsic gas and its floor.
+
+They also agree on whether the rules that read no state accept it. -/
 def transactionBytes (oracle : Oracle) : Property IO := propertyM do
   let c ← forAll genTxCase
   pure do
@@ -234,6 +242,7 @@ def genAddressItem : Gen Item := (fun (a : Address) => Item.bytes ⟨a.toArray�
 /-- The fields before the signature of a valid transaction of a type on a chain.
 
 A legacy transaction ends with its chain, where 0 is for none.
+
 An authorization ends with the key of its authority, in place of a signature. -/
 def genUnsigned (type chain : Nat) : Gen Item := do
   let nonce ← genScalar 64
@@ -279,9 +288,14 @@ def highTwin : Transaction → Transaction
 
 /-- EthLib reads a transaction that eth-account signed as eth-account wrote it.
 
-The bytes decode and encode back, and the hash, the signing hash and the sender are those of
-eth-account, as is the authority of each authorization.
+The bytes decode and encode back.
+
+The hash, the signing hash and the sender are those of eth-account.
+
+So is the authority of each authorization.
+
 A legacy transaction that signs a chain has no sender before Spurious Dragon.
+
 The twin with a high `s` has no sender from Homestead, and the same sender in Frontier. -/
 def signedTransaction (oracle : Oracle) : Property IO := propertyM do
   let type ← forAll (Gen.nat (.constant 0 4))
@@ -323,10 +337,13 @@ open EthLib.Execution.State in
 /-- The sender of a transaction may send it exactly when the rules of its EIPs say so.
 
 The model is in `Nat`, from the text of EIP-1559, EIP-4844, EIP-3607 and EIP-7702.
+
 The nonce of the sender is the nonce of the transaction.
-Its balance covers the gas limit at the maximum fee, the blob gas at its maximum fee, and the
-value.
+
+Its balance covers the gas limit at the maximum fee, the blob gas at its maximum fee, and the value.
+
 It has no code, or from Pectra a delegation indicator: `0xef0100`, then 20 bytes.
+
 The price that the sender pays is the price of EIP-1559: the base fee plus the capped priority. -/
 def senderRules : Property IO := pureIO do
   let fork ← forAllWith (·.2) genFork

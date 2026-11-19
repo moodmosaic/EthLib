@@ -4,12 +4,19 @@ import EthLib.Engine.NewPayload
 /-!
 # `engine_newPayload`, versions 1 to 5, before execution
 
-A case names a version of the method, a payload at a time on a test chain, and what is done to the
-request.
-The oracle writes the parameters, with the block hash that it computes, and the answers that the
-specification allows.
-So the matrix of version, fork and structure, the forms of the fields, and the header hash at
-each fork are checked against a reference that shares no code with EthLib.
+A case names a version of the method and a payload at a time on a test chain.
+
+It also names what is done to the request.
+
+The oracle writes the parameters, with the block hash that it computes.
+
+It also writes the answers that the specification allows.
+
+So three things are checked against a reference that shares no code with EthLib:
+
+- The matrix of version, fork and structure.
+- The forms of the fields.
+- The header hash at each fork.
 -/
 
 open Hedgehog Support EthLib EthLib.Base EthLib.Engine
@@ -55,8 +62,13 @@ def decimal (n : Nat) : Json := .str (toString n)
 
 /-- The name of a transaction that the oracle signed.
 
-Mostly it is one that the forks of the version take; a blob transaction before Dencun, a set-code
-transaction before Pectra, and bytes that are no transaction are the near misses. -/
+Mostly it is one that the forks of the version take.
+
+The near misses are:
+
+- A blob transaction before Dencun.
+- A set-code transaction before Pectra.
+- Bytes that are no transaction. -/
 def genTxName (version : Nat) : Gen String :=
   let early := ["legacy", "accessList", "dynamicFee"]
   let own := early ++ (if version ≥ 3 then ["blob1", "blob2"] else []) ++
@@ -131,8 +143,11 @@ def NewPayloadCase.toJson (c : NewPayloadCase) : Json :=
 
 /-- A call that is valid for its version, or one step from it.
 
-The structure is the one the version takes at the time, mostly, and the time is in a fork that
-the version takes, mostly: a call reaches the later checks only when the earlier ones pass. -/
+Mostly, the structure is the one the version takes at the time.
+
+Mostly, the time is in a fork that the version takes.
+
+The reason is that a call reaches the later checks only when the earlier ones pass. -/
 def genNewPayloadCase : Gen NewPayloadCase := do
   let version ← Gen.element [1, 2, 3, 4, 5]
   let timestamp ← Gen.frequency [(3, genTimeOf version), (2, genForkTime)]
@@ -184,10 +199,18 @@ def jsonOfHex (word : String) : Except String Json := do
 
 /-- `engine_newPayload` answers a call as its specification says.
 
-A request that is not of its version is `-32602`, a payload of a fork that the version does not
-take is `-38005`, and a payload that fails a check of the payload alone is `INVALID`, or
-`INVALID_BLOCK_HASH` for a wrong block hash in version 1, with no latest valid hash.
+A request that is not of its version is `-32602`.
+
+A payload of a fork that the version does not take is `-38005`.
+
+A payload that fails a check of the payload alone is `INVALID`.
+
+For a wrong block hash in version 1 it is `INVALID_BLOCK_HASH` instead.
+
+Both come with no latest valid hash.
+
 A payload that passes them all is `SYNCING` at a node without the parent's state.
+
 So the block hash that EthLib computes at each fork is the one of the reference. -/
 def newPayloadMatrix (oracle : Oracle) : Property IO := propertyM do
   let c ← forAllWith (fun c => c.toJson.compress) genNewPayloadCase

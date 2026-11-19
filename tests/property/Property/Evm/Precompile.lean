@@ -3,8 +3,12 @@ import Property.Evm.Program
 /-!
 # The precompiles beside the reference
 
-The call data is near valid: a reference library builds a valid input from a few numbers, then
-one rule of the precompile is broken, or the length is changed.
+The call data is near valid.
+
+A reference library builds a valid input from a few numbers.
+
+Then one rule of the precompile is broken, or the length is changed.
+
 The answer is that of the precompile of the Python execution-specs at the same fork.
 -/
 
@@ -14,8 +18,9 @@ namespace EvmProperty
 
 /-- What EthLib answers to a call of a precompile, in the text form of the oracle.
 
-`none` for an address that is no precompile at the fork, `halt` for a failure, else the gas left
-and the output. -/
+The answer is `none` for an address that is no precompile at the fork, and `halt` for a failure.
+
+Else it is the gas left and the output. -/
 def precompileEthLib (fork : Fork) (address : Nat) (data : ByteArray) (gas : Nat) : String :=
   if !Precompiles.isPrecompile fork address then "none"
   else match Precompiles.run fork address data gas with
@@ -47,6 +52,7 @@ def samePrecompile (oracle : Oracle) (fork : Fork × String) (address : Nat) (da
   let gas := gasAround fork.1 address data choice
   let answer ← oracle.ask ["pre", fork.2, toString address, toString gas, hex data]
   -- The reference names its error after `halt`, and EthLib's has another name.
+  --
   -- Its fixed-width integers overflow on a length near 2^256, where the price is out of reach.
   let want := if answer.startsWith "halt" || answer.startsWith "crash OverflowError" then "halt"
     else answer

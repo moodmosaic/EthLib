@@ -13,8 +13,9 @@ import Property.Curves.Machines
 /-!
 # The public-key layer, on generated inputs
 
-Each property generates inputs and requires an answer that EthLib did not compute: the one of
-a reference implementation (`oracle/curves.py`), or of a model on `Nat`.
+Each property generates inputs and requires an answer that EthLib did not compute.
+
+It is that of a reference implementation (`oracle/curves.py`), or of a model on `Nat`.
 
     lake exe curves-property              # 100 cases of each
     lake exe curves-property 1000

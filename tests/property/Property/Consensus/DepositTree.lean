@@ -5,13 +5,21 @@ import EthLib.Consensus.DepositTree
 /-!
 # The deposit tree of EIP-4881, as a state machine
 
-The model is the list of the leaves, the count of finalized deposits and whether a finalization
-recorded a block.
-The oracle computes the deposit root of a list of leaves with a naive Merkle tree of depth 32
-and checks a branch as `is_valid_merkle_branch` does.
+The model has three parts:
 
-After every transition the sparse tree must have the root of the model, prove exactly the
-deposits that are not finalized, and give a snapshot of the finalized ones.
+- The list of the leaves.
+- The count of finalized deposits.
+- Whether a finalization recorded a block.
+
+The oracle computes the deposit root of a list of leaves with a naive Merkle tree of depth 32.
+
+It checks a branch as `is_valid_merkle_branch` does.
+
+After every transition the sparse tree must meet three conditions:
+
+- It has the root of the model.
+- It proves exactly the deposits that are not finalized.
+- It gives a snapshot of the finalized ones.
 -/
 
 open Hedgehog Support EthLib EthLib.Base EthLib.Consensus EthLib.Serialization.Ssz

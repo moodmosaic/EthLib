@@ -5,8 +5,11 @@ import EthLib.Consensus.Proposers
 /-!
 # Accessors, mutators and fork upgrades on a state
 
-The helpers that the steps and operations are built from, each against its own function of
-consensus-specs, with arguments at and past the edges of the registry and of the epochs.
+These are the helpers that the steps and operations are built from.
+
+Each runs against its own function of consensus-specs.
+
+The arguments are at and past the edges of the registry and of the epochs.
 -/
 
 open Hedgehog Support EthLib EthLib.Base EthLib.Consensus EthLib.Serialization.Ssz

@@ -5,8 +5,10 @@ import EthLib.Cryptography.Vrf
 # The VRF tree against a model of EIP-8450's `vrf.Verify`
 
 The model hashes a leaf, climbs 32 siblings by the bits of the index, and hashes the output.
-A tree of `2^32` leaves cannot be built, so an opening is a secret and 32 siblings of any
-values, and the root is the one they lead to.
+
+A tree of `2^32` leaves cannot be built.
+
+So an opening is a secret and 32 siblings of any values, and the root is the one they lead to.
 -/
 
 open Hedgehog Support EthLib EthLib.Cryptography
@@ -44,8 +46,11 @@ def genChange : Gen Change :=
     (1, .rootSize <$> Gen.element [-1, 1]),
     (1, .swapSiblings <$> Gen.nat (.constant 0 30))]
 
-/-- Verification returns the output of the model, or nothing where the model refuses: a
-changed secret, sibling, root or index, an index from `2^32` on, a wrong length. -/
+/-- Verification returns the output of the model, or nothing where the model refuses:
+
+- A changed secret, sibling, root or index.
+- An index from `2^32` on.
+- A wrong length. -/
 def verifies (oracle : Oracle) : Property IO := propertyM do
   let opening ← forAllWith hex (genBytesN 1056)
   let index ← forAll genIndex
@@ -78,8 +83,9 @@ def verifies (oracle : Oracle) : Property IO := propertyM do
     | some o => hex (encodeOpening o) === hex opening
     | none => ensure (opening.size != 1056) "an opening of 1056 bytes does not decode"
 
-/-- The secret and the output of a seed at an index, and a mixed value, are the hashes of
-the specification. -/
+/-- The secret and the output of a seed at an index are the hashes of the specification.
+
+So is a mixed value. -/
 def hashes (oracle : Oracle) : Property IO := propertyM do
   let (seed, randomness) ← forAllWith (fun (a, b) => s!"{hex a} {hex b}")
     (Gen.zip (genBytesN 32) (genBytesN 32))

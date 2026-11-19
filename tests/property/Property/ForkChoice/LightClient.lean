@@ -7,15 +7,24 @@ import EthLib.Consensus.LightClient.Sync
 # The light client store as a scenario of commands, against the pyspec
 
 The commands are those of `sync-protocol.md`: process an update, and force the best update.
+
 Each is a type of its own with a `Command` instance, and the scenario runs in madhouse mode.
 
-The oracle (`oracle/forkchoice_lightclient.py`) builds each update with true Merkle branches from
-one template state, processes it on the store of the pyspec, and answers with the bytes of the
-update, its verdict and a digest of its store.
+The oracle is `oracle/forkchoice_lightclient.py`.
+
+It builds each update with true Merkle branches from one template state.
+
+It processes the update on the store of the pyspec.
+
+It answers with the bytes of the update, its verdict and a digest of its store.
+
 The driver processes the same bytes on EthLib's store and requires the same verdict and digest.
 
-`Command.build` reads no state, so a command draws its slots blind, around the period edges of the
-minimal preset, and the store is made on the first command that runs.
+`Command.build` reads no state.
+
+So a command draws its slots blind, around the period edges of the minimal preset.
+
+And the store is made on the first command that runs.
 -/
 
 open Hedgehog Support EthLib EthLib.Base EthLib.Consensus EthLib.Serialization.Ssz

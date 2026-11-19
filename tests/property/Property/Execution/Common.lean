@@ -8,8 +8,9 @@ import EthLib.Execution.State
 /-!
 # What the modules of the execution driver share
 
-The forks that the reference knows, RLP items with a bias to the edges of each field, and a
-mutation of an item that keeps it almost valid.
+The forks that the reference knows, and RLP items with a bias to the edges of each field.
+
+Also a mutation of an item that keeps it almost valid.
 -/
 
 open Hedgehog Support EthLib EthLib.Base

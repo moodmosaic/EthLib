@@ -4,6 +4,7 @@ import Property.Curves.Bls
 # BLS signatures, key generation and key paths
 
 The scheme is the proof of possession of the BLS signature draft, version 4, section 3.3.
+
 The references are py_ecc and milagro, and a model of ERC-2333 written from its text.
 -/
 
@@ -73,8 +74,9 @@ def genBadSig (good : ByteArray) : Gen ByteArray :=
     (1, pure ⟨(G2.compress (G2.neg ((G2.uncompress
         (vec 96 good)).toOption.getD G2.zero))).toArray⟩)]
 
-/-- Verification accepts what py_ecc and milagro accept, on a key, message or signature
-changed at one place. -/
+/-- Verification accepts what py_ecc and milagro accept.
+
+The key, the message or the signature is changed at one place. -/
 def verifies (oracle : Oracle) : Property IO := propertyM do
   let k ← forAll (genScalar r)
   let msg ← forAllWith hex (genBytes (.linear 0 40))
@@ -91,8 +93,9 @@ def verifies (oracle : Oracle) : Property IO := propertyM do
     (if popVerify (vec 48 pk) (vec 96 proof) then "1" else "0") ===
       (← oracle.ask ["popverify", hex pk, hex proof])
 
-/-- Aggregation sums the signatures as py_ecc does, without a subgroup check, and refuses
-an empty list and a signature that does not decode. -/
+/-- Aggregation sums the signatures as py_ecc does, without a subgroup check.
+
+It refuses an empty list and a signature that does not decode. -/
 def aggregates (oracle : Oracle) : Property IO := propertyM do
   let sigs ← forAllWith (fun ss => toString (ss.map hex)) (Gen.list (.linear 0 5) (do
     let k ← genScalar r
@@ -145,8 +148,9 @@ def aggregateVerifies (oracle : Oracle) : Property IO := propertyM do
       (if aggregateVerify (pks.map (vec 48)).toArray msgs.toArray (vec 96 sig) then "1" else "0")
         === (if got then "1" else "0")
 
-/-- The fast aggregate verification, and the two wrappers of Ethereum, are those of the draft
-and of the consensus specification. -/
+/-- The fast aggregate verification is that of the draft and of the consensus specification.
+
+So are the two wrappers of Ethereum. -/
 def fastAggregateVerifies (oracle : Oracle) : Property IO := propertyM do
   let signers ← forAll genSigners
   let msg ← forAllWith hex (genBytes (.linear 0 8))

@@ -4,10 +4,16 @@ import Property.Consensus.Operations
 # A block's operations in any order, as commands
 
 Each operation of block processing is a command of its own type.
+
 A scenario starts from a state of settled validators and runs a random sequence of commands.
-The state that EthLib reaches after one command is the state the next one meets, on both sides,
-so the sequence reaches states that no single step does: an exit after a slashing, a
-consolidation of a validator with a pending withdrawal, an epoch boundary between two requests.
+
+The state that EthLib reaches after one command is the state the next one meets, on both sides.
+
+So the sequence reaches states that no single step does:
+
+- An exit after a slashing.
+- A consolidation of a validator with a pending withdrawal.
+- An epoch boundary between two requests.
 
 A command that the reference refuses must be refused, and it leaves the state as it was.
 -/
@@ -35,6 +41,7 @@ structure Chain (fork : Fork) where
   /-- The builders that no command has asked to exit yet.
 
   Commands are generated before any runs, so this is what a generator knows of the state:
+
   `Command.next` moves it, and `Command.buildIn` reads it. -/
   staying : List Nat := firstBuilders
 
@@ -211,6 +218,7 @@ instance {fork : Fork} : Command (BuilderDepositCommand fork) (Chain fork) (Env 
 /-- From Gloas: an exit request of a builder.
 
 Generated blind, a request names a builder that never was or that has left, and none takes effect.
+
 So most requests are generated for the state: a builder that stays, with its own address. -/
 structure BuilderExitCommand (fork : Fork) where
   call : Invocation fork

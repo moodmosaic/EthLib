@@ -4,8 +4,9 @@ import EthLib.Consensus.PayloadTimeliness
 /-!
 # The steps of the epoch transition, one at a time
 
-Each step runs on a generated state at every fork that has it, against the same function of
-consensus-specs.
+Each step runs on a generated state at every fork that has it.
+
+The reference is the same function of consensus-specs.
 -/
 
 open Hedgehog Support EthLib EthLib.Base EthLib.Consensus EthLib.Serialization.Ssz

@@ -156,8 +156,9 @@ def tallLists (oracle : Oracle) : Property IO := propertyM do
 
 /-! ## Multiproofs of a value -/
 
-/-- A multiproof built for indices of a value rebuilds its root, by EthLib and by the
-specification. -/
+/-- A multiproof built for indices of a value rebuilds its root.
+
+This holds by EthLib and by the specification. -/
 def multiproofOfValue (oracle : Oracle) : Property IO := propertyM do
   let (shape, value) ← forAllWith typedText genTyped
   let indices ← forAll (Gen.list (.linear 1 4) (genGindex shape))
@@ -221,8 +222,12 @@ partial def normalized : Lean.Json → Lean.Json
 
 /-- A document near a valid one, where EthLib reads it, holds the value the specification reads.
 
-So no document with a leading zero, a padded bitfield, a count out of the type or an element
-of another kind is read as a value that the specification does not also read from it. -/
+So none of these documents is read as a value that the specification does not also read from it:
+
+- A document with a leading zero.
+- A document with a padded bitfield.
+- A document with a count out of the type.
+- A document with an element of another kind. -/
 def sszJsonNear (oracle : Oracle) : Property IO := propertyM do
   let (shape, value) ← forAllWith typedText genTyped
   let valid := (Ssz.jsonOf shape .opaque value).toOption.getD .null
@@ -232,8 +237,10 @@ def sszJsonNear (oracle : Oracle) : Property IO := propertyM do
     annotate s!"the specification: {cited}"
     match Ssz.valueOf shape .opaque document with
     | .error e =>
-      -- The reader of the specification also takes hex without its marker and other loose
-      -- spellings, which the vectors of the same repository ask a reader to refuse.
+      -- The specification's reader also takes hex without its marker and other loose spellings.
+      --
+      -- The vectors of the same repository ask a reader to refuse them.
+      --
       -- So a refusal is checked on the one document that must be read: the valid one.
       annotate s!"EthLib refused: {repr e}"
       ensure (document.compress != valid.compress) "the valid document was refused"

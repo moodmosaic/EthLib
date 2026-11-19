@@ -5,8 +5,9 @@ import EthLib.Execution.Evm
 /-!
 # Running EthLib's EVM beside the reference
 
-A message runs in EthLib and in the Python execution-specs from the same state, and each side
-prints what the message left in the same text form.
+A message runs in EthLib and in the Python execution-specs from the same state.
+
+Each side prints what the message left in the same text form.
 -/
 
 open Hedgehog Support EthLib EthLib.Base EthLib.Execution EthLib.Execution.Evm

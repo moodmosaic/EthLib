@@ -5,8 +5,9 @@ import EthLib.Base
 /-!
 # The base layer, on generated inputs
 
-Each property generates inputs and requires an answer that EthLib did not compute: the one of a
-reference implementation (`oracle/base.py`), or of arithmetic on `Nat` and `Int`.
+Each property generates inputs and requires an answer that EthLib did not compute.
+
+It is that of a reference implementation (`oracle/base.py`), or of arithmetic on `Nat` and `Int`.
 
     lake exe base-property            # 100 cases of each
     lake exe base-property 10000
@@ -54,7 +55,8 @@ def genChar : Gen Char :=
     (1, Gen.unicode)]
 
 /-- Code points in hexadecimal. -/
-def points (chars : List Char) : List String := chars.map fun c => String.ofList (Nat.toDigits 16 c.toNat)
+def points (chars : List Char) : List String :=
+  chars.map fun c => String.ofList (Nat.toDigits 16 c.toNat)
 
 /-- NFKD is the host's, on the code points the host knows. -/
 def nfkd (oracle : Oracle) : Property IO := propertyM do
@@ -86,8 +88,10 @@ def checked : Property IO := pureIO do
     | .ok _, none => false
   ensure (agrees (Uint64.addChecked a b) (some (a.toNat + b.toNat))) "addChecked"
   ensure (agrees (Uint64.mulChecked a b) (some (a.toNat * b.toNat))) "mulChecked"
-  ensure (agrees (Uint64.subChecked a b) (if b ≤ a then some (a.toNat - b.toNat) else none)) "subChecked"
-  ensure (agrees (Uint64.divChecked a b) (if b = 0 then none else some (a.toNat / b.toNat))) "divChecked"
+  ensure (agrees (Uint64.subChecked a b) (if b ≤ a then some (a.toNat - b.toNat) else none))
+    "subChecked"
+  ensure (agrees (Uint64.divChecked a b) (if b = 0 then none else some (a.toNat / b.toNat)))
+    "divChecked"
   (Uint64.saturatingSub a b).toNat === a.toNat - b.toNat
 
 /-- A 256-bit word read as two's complement and written back. -/
@@ -117,9 +121,11 @@ def hexRoundTrip : Property IO := pureIO do
   ensure (marked.toList.take 2 == ['0', 'x']) "no 0x marker"
   let text := String.ofList (marked.toList.drop 2)
   ensure ((hexBytes? text.toList).map (·.toList) == some bytes) "lower case does not read back"
-  ensure ((hexBytes? text.toUpper.toList).map (·.toList) == some bytes) "upper case does not read back"
+  ensure ((hexBytes? text.toUpper.toList).map (·.toList) == some bytes)
+    "upper case does not read back"
   let junk ← forAll (Gen.string (.linear 0 6) Gen.ascii)
-  let valid := junk.length % 2 == 0 && junk.all fun c => c.isDigit || ('a' ≤ c && c ≤ 'f') || ('A' ≤ c && c ≤ 'F')
+  let valid := junk.length % 2 == 0 &&
+    junk.all fun c => c.isDigit || ('a' ≤ c && c ≤ 'f') || ('A' ≤ c && c ≤ 'F')
   (hexBytes? junk.toList).isSome === valid
 
 /-- The gas limit moves toward the target and stays within the bound of a child. -/
@@ -170,8 +176,10 @@ def readerModel : Model ReaderModel Read where
   transitions s :=
     let left := s.data.length - s.pos
     -- Widths up to the bytes left, exactly the bytes left, and one past them.
-    let width := Gen.frequency [(6, Gen.nat (.constant 0 left)), (1, pure left), (2, pure (left + 1))]
-    Gen.frequency [(4, Read.bytes <$> width), (4, Read.uint <$> width), (1, Read.require <$> Gen.bool)]
+    let width :=
+      Gen.frequency [(6, Gen.nat (.constant 0 left)), (1, pure left), (2, pure (left + 1))]
+    Gen.frequency
+      [(4, Read.bytes <$> width), (4, Read.uint <$> width), (1, Read.require <$> Gen.bool)]
   apply s t :=
     let s := { s with before := s.pos }
     if s.accepts t then { s with pos := s.pos + t.width } else s
@@ -224,7 +232,8 @@ structure PutBE where
   n : Nat
 
 instance : Command PutBE Stream Unit IO where
-  apply c s := pure { bytes := s.bytes ++ natToBytes c.len c.n, pending := s.pending ++ [.be c.len c.n] }
+  apply c s :=
+    pure { bytes := s.bytes ++ natToBytes c.len c.n, pending := s.pending ++ [.be c.len c.n] }
   label c := s!"PUT_BE({c.len}, {c.n})"
   build _ := do
     let len ← Gen.nat (.constant 0 33)
@@ -286,7 +295,8 @@ instance : Command Take Stream Unit IO where
     match item with
     | .be len n => finish (ByteReader.uint () len) (· === n)
     | .le len n => finish (ByteReader.bytes () len) fun field =>
-        if h : field.length = len then bytesToUint (⟨field.toArray, by simpa using h⟩ : Vector UInt8 len) === n
+        if h : field.length = len then
+          bytesToUint (⟨field.toArray, by simpa using h⟩ : Vector UInt8 len) === n
         else failWith "the field has another length"
     | .hex bytes => finish takeText fun text =>
         (hexBytes? (text.toList.drop 2)).map (·.toList) === some bytes

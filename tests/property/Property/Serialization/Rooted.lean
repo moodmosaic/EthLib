@@ -6,6 +6,7 @@ import Property.Serialization.Common
 # Typed SSZ values that keep their tree, as state machines
 
 A rooted list or vector rehashes one path on a write.
+
 The model is the plain list of elements, and the root of the model is the reference's.
 
 - `StateMachine`: a fork-chosen list, before and after the switch to a progressive list.
@@ -96,6 +97,7 @@ def pushAll {switch fork : Fork} {α : Type} [Element α] {limit : Nat}
 /-- The rooted fork-chosen list against the list of its elements.
 
 After each write, the bytes and the root are those the reference gives the model.
+
 The list is also read back from its bytes, which builds its tree afresh: the roots agree. -/
 def listMachine (oracle : Oracle) (switch fork : Fork) (α : Type) [Element α] (limit : Nat)
     (typeOf : String) :

@@ -6,18 +6,33 @@ import EthLib.Networking.Gossip.Router
 /-!
 # The gossipsub router, as commands in madhouse mode
 
-These are the `Command` tests of the layer: each event that a router sees is a type of its own
-with a `Command` instance, and a scenario draws random sequences of them.
+These are the `Command` tests of the layer.
+
+Each event that a router sees is a type of its own with a `Command` instance.
+
+A scenario draws random sequences of them.
 
 The state holds EthLib's router and a model beside it.
-The model is written from gossipsub v1.0 and v1.1: what was seen and when, what the message
-cache holds and how old it is, every backoff, the subscriptions of the peers, and the fanout.
-Each command says what the specification asks of the router's answer, and then every
-invariant is checked: no explicit peer and no peer within a backoff is in a mesh, the caches
-answer as the model does, the backoffs are the model's.
 
-Where the specification lets the router choose (which peers to graft, to keep, to gossip to),
-the commands check the bounds on the choice and that it could not have taken more.
+The model is written from gossipsub v1.0 and v1.1:
+
+- What was seen and when.
+- What the message cache holds and how old it is.
+- Every backoff.
+- The subscriptions of the peers.
+- The fanout.
+
+Each command says what the specification asks of the router's answer.
+
+Then every invariant is checked:
+
+- No explicit peer and no peer within a backoff is in a mesh.
+- The caches answer as the model does.
+- The backoffs are the model's.
+
+The specification lets the router choose which peers to graft, to keep, to gossip to.
+
+There the commands check the bounds on the choice and that it could not have taken more.
 
 The parameters are small, so that a few peers cross every bound: D = 3, D_low = 2, D_high = 4.
 -/
@@ -49,8 +64,12 @@ def peerCount : Nat := 12
 def explicitPeers : List Nat := [6, 7]
 def outboundPeers : List Nat := [0, 1, 2, 8]
 
-/-- The scores: 8 is negative, 9 is below the gossip threshold too, 10 below the publish
-threshold too, and 11 is graylisted. -/
+/-- The scores:
+
+- 8 is negative.
+- 9 is below the gossip threshold too.
+- 10 is below the publish threshold too.
+- 11 is graylisted. -/
 def standing (p : PeerId) : Standing :=
   let i := index p
   { negative := 8 ≤ i, belowGossip := 9 ≤ i, belowPublish := 10 ≤ i, belowGraylist := 11 ≤ i }
@@ -111,8 +130,9 @@ def subscribed (w : World) (t : String) : List Nat :=
   (List.range peerCount).filter fun i => w.subs.contains (i, t)
 def mesh (w : World) (t : String) : List Nat := (peersOf w.router.mesh t).map index
 def fanoutPeers (w : World) (t : String) : List Nat := (peersOf w.router.fanout t).map index
-/-- Whether this node may GRAFT a peer on a topic, by v1.1: not explicit, score not negative,
-no backoff. -/
+/-- Whether this node may GRAFT a peer on a topic, by v1.1.
+
+The peer is not explicit, its score is not negative, and it has no backoff. -/
 def graftable (w : World) (t : String) (i : Nat) : Bool :=
   i ∉ explicitPeers && i < 8 && w.backoffEnd t i ≤ w.now
 

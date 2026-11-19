@@ -11,8 +11,9 @@ import EthLib.Networking.Quic.Varint
 /-!
 # Varints and QUIC, on generated inputs
 
-The three varints of the layer against decoders written from their sources, and QUIC's integers,
-packet numbers, keys and packet protection against aioquic.
+The three varints of the layer against decoders written from their sources.
+
+Also QUIC's integers, packet numbers, keys and packet protection against aioquic.
 -/
 
 open Hedgehog Support EthLib EthLib.Networking

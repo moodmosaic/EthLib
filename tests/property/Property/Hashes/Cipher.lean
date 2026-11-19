@@ -40,6 +40,7 @@ def genWidth : Gen Nat :=
     (2, Gen.nat (.constant 0 128))]
 
 /-- CTR is that of SP 800-38A §6.5 with the incrementing function of Appendix B.1.
+
 The counters start where their low `m` bits wrap, at 2^8, 2^32, 2^64 and 2^128. -/
 def aesCtr (oracle : Oracle) : Property IO := propertyM do
   let key ← forAll genAesKey
@@ -68,8 +69,11 @@ def pairOf {ε : Type} (result : Except ε (ByteArray × ByteArray)) : String :=
   | .ok (c, tag) => s!"{hex c} {hex tag}"
   | .error _ => "error"
 
-/-- GCM encryption is the reference's: any IV length, empty text or additional data, and the
-tag lengths that SP 800-38D §5.2.1.2 and Appendix C leave. -/
+/-- GCM encryption is the reference's.
+
+This covers any IV length, empty text or additional data.
+
+It also covers the tag lengths that SP 800-38D §5.2.1.2 and Appendix C leave. -/
 def gcmEncrypt (oracle : Oracle) : Property IO := propertyM do
   let key ← forAll genAesKey
   let t ← forAll genTagLen
@@ -90,8 +94,11 @@ def genTamper : Gen Tamper :=
   Gen.frequency [(3, pure .none),
     (6, Gen.element [.tag, .text, .aad, .nonce, .shortTag, .longTag])]
 
-/-- GCM decryption opens what the reference opens: a message with one bit changed in the tag,
-the ciphertext, the additional data or the IV is refused, and so is a tag of another length. -/
+/-- GCM decryption opens what the reference opens.
+
+A message with one bit changed in the tag, the ciphertext, the additional data or the IV is refused.
+
+So is a tag of another length. -/
 def gcmDecrypt (oracle : Oracle) : Property IO := propertyM do
   let key ← forAll genAesKey
   let t ← forAll (Gen.element [16, 15, 14, 13, 12])
@@ -131,8 +138,9 @@ def chachaBlock (oracle : Oracle) : Property IO := propertyM do
       === (← oracle.ask ["chacha", hex key, toString counter, hex nonce,
         hex ⟨Array.replicate 64 0⟩])
 
-/-- ChaCha20 encryption is the reference's, and is refused exactly when a block would need
-the counter `2^32`. -/
+/-- ChaCha20 encryption is the reference's.
+
+It is refused exactly when a block would need the counter `2^32`. -/
 def chachaCrypt (oracle : Oracle) : Property IO := propertyM do
   let (key, nonce) ← forAll (Gen.zip (genBytesOf 32) (genBytesOf 12))
   let counter ← forAll genBlockCounter
@@ -196,8 +204,9 @@ def lowOrder : List Nat :=
     39382357235489614581723060781553021112529911719440698176882885853963445705823,
     p - 1, p, p + 1]
 
-/-- A u-coordinate: any, of small order, non-canonical (`p` to `2^255 - 1`), each with the high
-bit set or not. -/
+/-- A u-coordinate: any, of small order, or non-canonical (`p` to `2^255 - 1`).
+
+Each comes with the high bit set or not. -/
 def genU : Gen ByteArray := do
   let u ← Gen.frequency [
     (3, genNatBits 255),
@@ -207,8 +216,11 @@ def genU : Gen ByteArray := do
   let high ← Gen.bool
   pure (unvec (Base.uintToBytes 32 (if high then u + 2 ^ 255 else u)))
 
-/-- X25519 is the function of RFC 7748 §5: it masks the high bit of the coordinate, reduces a
-non-canonical one, and gives zero on a point of small order. -/
+/-- X25519 is the function of RFC 7748 §5.
+
+It masks the high bit of the coordinate and reduces a non-canonical one.
+
+It gives zero on a point of small order. -/
 def x25519 (oracle : Oracle) : Property IO := propertyM do
   let scalar ← forAll (genBytesOf 32)
   let u ← forAll genU

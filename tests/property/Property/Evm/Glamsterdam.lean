@@ -3,8 +3,10 @@ import Property.Evm.Program
 /-!
 # Glamsterdam beside the branch of the reference
 
-No release of the Python execution-specs has Glamsterdam, so the reference is its branch
-`forks/amsterdam` at one commit, in `oracle/evm_amsterdam.py`.
+No release of the Python execution-specs has Glamsterdam.
+
+So the reference is its branch `forks/amsterdam` at one commit, in `oracle/evm_amsterdam.py`.
+
 The fork is not final: a disagreement may be a change of an EIP after the text that EthLib cites.
 -/
 

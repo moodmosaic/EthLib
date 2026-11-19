@@ -5,25 +5,28 @@ import EthLib.Consensus.SlashingProtection
 /-!
 # Slashing protection as a state machine, against EIP-3076 read literally
 
-The system is `Interchange`: the record of a signer, with `checkBlock`, `checkAttestation`,
-`recordBlock`, `recordAttestation` and `importFile`.
+The system is `Interchange`, the record of a signer.
+
+It comes with `checkBlock`, `checkAttestation`, `recordBlock`, `recordAttestation` and `importFile`.
 
 The model is a `Book`, written from the text of EIP-3076 and not from EthLib:
 
 - `held` is the data that the five conditions of the EIP range over, as plain lists.
-  A signature appends a record, and an import keeps the maxima, as the section Advice for Minimal
-  Databases says.
+  A signature appends a record, and an import keeps the maxima.
+  The section Advice for Minimal Databases says so.
 - `history` is every message ever signed or imported, with nothing dropped.
 
 Two claims are checked after every request:
 
 - EthLib refuses exactly when one of the five conditions, applied to `held`, says refuse.
-- Safety, which no strategy may break: an accepted message is not slashable with any message of
-  `history`, by the definitions of a double block, a double vote and a surround vote.
+- Safety, which no strategy may break.
+  An accepted message is not slashable with any message of `history`.
+  Slashable is by the definitions of a double block, a double vote and a surround vote.
 
-The same steps run under both state machine styles of lean-hedgehog: a `StateMachine` whose
-generator reads the model to aim at the records that exist, and a `Command` scenario in madhouse
-mode whose commands are generated blind.
+The same steps run under both state machine styles of lean-hedgehog:
+
+- A `StateMachine` whose generator reads the model to aim at the records that exist.
+- A `Command` scenario in madhouse mode whose commands are generated blind.
 -/
 
 open Hedgehog Support EthLib EthLib.Consensus Lean

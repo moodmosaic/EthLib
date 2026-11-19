@@ -4,10 +4,17 @@ import EthLib.Engine.ForkchoiceUpdated
 /-!
 # `engine_forkchoiceUpdated`: the choice of the head, as a state machine
 
-The model is a tree of blocks by index, written from steps 1 to 5, 7 and 9 of
-`engine_forkchoiceUpdatedV1` and from the payload validation of `paris.md`.
-A sequence adds blocks to the tree and sends updates; after each update the status, the latest
-valid hash, the head and the known finalized block of EthLib must be those of the model.
+The model is a tree of blocks by index.
+
+It is written from steps 1 to 5, 7 and 9 of `engine_forkchoiceUpdatedV1`.
+
+It is also written from the payload validation of `paris.md`.
+
+A sequence adds blocks to the tree and sends updates.
+
+After each update, four values of EthLib must be those of the model.
+
+They are the status, the latest valid hash, the head and the known finalized block.
 -/
 
 open Hedgehog Support EthLib EthLib.Base EthLib.Engine
@@ -146,6 +153,7 @@ def BlockRef.hash : BlockRef → Hash32
 /-- A block for the tree: on a block of the tree mostly, valid mostly.
 
 A block of proof of work sits on one of proof of work, or on no known block.
+
 Its totals are near the terminal total difficulty of 100. -/
 def genModelBlock (m : ForkchoiceModel) : Gen ModelBlock := do
   let size := m.blocks.size
@@ -268,8 +276,12 @@ open Lean (Json)
 /-- The forks of the test chain whose attributes a version of the method takes.
 
 Version 1 is of Paris and version 2 of Paris and Shanghai, before Cancun by `cancun.md`.
-Version 3 takes Cancun and Prague by `prague.md`, and Osaka with its blob forks, which no later
-version takes; `amsterdam.md` ends it at Amsterdam, which version 4 takes. -/
+
+Version 3 takes Cancun and Prague by `prague.md`.
+
+It also takes Osaka with its blob forks, which no later version takes.
+
+`amsterdam.md` ends version 3 at Amsterdam, which version 4 takes. -/
 def attributesTaken (version : Nat) (time : Nat) : Bool :=
   match version with
   | 1 => time < 1000
@@ -391,8 +403,9 @@ def attributesOutcome (c : AttributesCase) : String :=
 
 /-- The answers that the specification allows to an update with payload attributes.
 
-`stateShape` and `attributesShape` are the versions of the structures that the two values have,
-by the oracle, or 0. -/
+`stateShape` and `attributesShape` are the versions of the structures that the two values have.
+
+The oracle gives each version, or 0. -/
 def attributesAllowed (c : AttributesCase) (stateShape attributesShape : Nat) : List String :=
   let items := match c.params with
     | .arr items => items.toList
@@ -426,9 +439,13 @@ def attributesAllowed (c : AttributesCase) (stateShape attributesShape : Nat) : 
 /-- `engine_forkchoiceUpdated` answers payload attributes as its specification says.
 
 Parameters that are not of the method are `-32602`.
-Attributes count only for a valid head that is applied: a structure that the version does not
-take is `-38003`, a time in a fork that it does not take is `-38005`, and a time not above the
-head's is `-38003`.
+
+Attributes count only for a valid head that is applied:
+
+- A structure that the version does not take is `-38003`.
+- A time in a fork that the version does not take is `-38005`.
+- A time not above the head's is `-38003`.
+
 Attributes that pass begin a build, and the answer names it. -/
 def forkchoiceAttributes (oracle : Oracle) : Property IO := propertyM do
   let c ← forAll genAttributesCase

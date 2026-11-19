@@ -8,8 +8,9 @@ import EthLib.Consensus.WeakSubjectivity
 /-!
 # Pure helpers, against the pyspec
 
-The order of light client updates, the custody groups of PeerDAS and the subnet computations, each
-on inputs at its edges, against `oracle/forkchoice_helpers.py`.
+The order of light client updates, the custody groups of PeerDAS and the subnet computations.
+
+Each runs on inputs at its edges, against `oracle/forkchoice_helpers.py`.
 -/
 
 open Hedgehog Support EthLib EthLib.Base EthLib.Consensus EthLib.Serialization.Ssz

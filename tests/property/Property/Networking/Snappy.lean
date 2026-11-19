@@ -10,9 +10,14 @@ import EthLib.Networking.Snappy.FrameEncode
 # Snappy, on generated blocks and streams
 
 A decoder's bugs sit in inputs that are almost valid.
-So the generators here write blocks element by element, with every form the format allows and
-some it forbids, and then the properties ask two references whether each block is valid:
-cramjam (the Rust `snap` crate) and a decoder written from `format_description.txt`.
+
+So the generators here write blocks element by element.
+
+The blocks have every form the format allows and some it forbids.
+
+Then the properties ask two references whether each block is valid.
+
+They are cramjam (the Rust `snap` crate) and a decoder written from `format_description.txt`.
 -/
 
 open Hedgehog Support EthLib EthLib.Networking
@@ -135,8 +140,10 @@ def decompressModel (oracle : Oracle) : Property IO := propertyM do
 /-- Whether cramjam reads the block as the format says.
 
 cramjam reads a preamble of more than five bytes, which the C++ reference and EthLib refuse.
-It also loads four bytes for a literal length of one to four bytes, so it refuses such a literal
-when fewer than four bytes follow its tag. -/
+
+It also loads four bytes for a literal length of one to four bytes.
+
+So it refuses such a literal when fewer than four bytes follow its tag. -/
 def Block.snapReads (b : Block) : Bool :=
   let rec go : List Element → Bool
     | [] => true

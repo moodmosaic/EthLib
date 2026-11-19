@@ -132,8 +132,9 @@ def genHeaderBytes : Gen ((Fork × String) × ByteArray) := do
 
 /-- EthLib and execution-specs agree on the bytes of a header.
 
-They agree on whether the bytes hold a header of the fork, and then on its hash and on the
-numbers that it holds. -/
+They agree on whether the bytes hold a header of the fork.
+
+Then they agree on its hash and on the numbers that it holds. -/
 def headerBytes (oracle : Oracle) : Property IO := propertyM do
   let (fork, bytes) ← forAllWith (fun (fork, bytes) => s!"{fork.2} {hex bytes}") genHeaderBytes
   pure do
@@ -146,6 +147,7 @@ def genNear (right : Nat) : Gen Nat :=
 /-- A header and a child that follows it at the same fork, right in most fields.
 
 The child takes what EthLib expects of it, and now and then a value beside that.
+
 So a rule that EthLib has wrong shows as a child that the reference refuses. -/
 def genHeaderPair : Gen ((Fork × String) × RawHeader × RawHeader) := do
   let fork ← genFork
@@ -243,8 +245,9 @@ def describeReceipt (fork : Fork) (bytes : ByteArray) : String :=
 
 /-- EthLib and execution-specs agree on the bytes of a receipt.
 
-They agree on whether the bytes hold a receipt of the fork, and then on its type, its outcome,
-its gas, its logs and the hash of its fields. -/
+They agree on whether the bytes hold a receipt of the fork.
+
+Then they agree on its type, its outcome, its gas, its logs and the hash of its fields. -/
 def receiptBytes (oracle : Oracle) : Property IO := propertyM do
   let (fork, bytes) ← forAllWith (fun (fork, bytes) => s!"{fork.2} {hex bytes}") genReceiptBytes
   pure do
@@ -293,6 +296,7 @@ def difficulty (oracle : Oracle) : Property IO := propertyM do
 /-- The rewards of a block are those of execution-specs, and none from Paris.
 
 The block reward is the constant of the fork there.
+
 The reward of a beneficiary and of an ommer follow the Yellow Paper, 11.3, in `Nat`. -/
 def rewards (oracle : Oracle) : Property IO := propertyM do
   let fork ← forAllWith (·.2) genWorkFork
@@ -365,10 +369,13 @@ namespace ExecutionProperty
 open EthLib.Execution.State in
 /-- The DAO Fork moves the ether of the accounts of EIP-779 to its recovery contract.
 
-Each account of the list, the length of the list and the recovery contract are those of
-execution-specs.
-After the fork an account of the list holds nothing, and the recovery contract holds what the
-accounts held, with what it held before. -/
+Each account of the list and the length of the list are those of execution-specs.
+
+So is the recovery contract.
+
+After the fork an account of the list holds nothing.
+
+The recovery contract then holds what the accounts held, with what it held before. -/
 def daoFork (oracle : Oracle) : Property IO := propertyM do
   let index ← forAll (Gen.nat (.constant 0 (DAO_ACCOUNTS.length + 1)))
   let funded ← forAll (Gen.list (.linear 0 12)
@@ -495,9 +502,17 @@ where
 open EthLib.Execution.Blocks in
 /-- EthLib accepts the ommers of a block exactly when execution-specs does, the seal aside.
 
-The candidates are fresh siblings of recent blocks, mostly valid, and also ommers that a recent
-block holds, blocks of the chain, headers with a wrong difficulty, the same header twice, three
-headers, siblings of the block itself and ommers that are too old. -/
+The candidates are fresh siblings of recent blocks, mostly valid.
+
+The other candidates are:
+
+- Ommers that a recent block holds.
+- Blocks of the chain.
+- Headers with a wrong difficulty.
+- The same header twice.
+- Three headers.
+- Siblings of the block itself.
+- Ommers that are too old. -/
 def ommersValid (oracle : Oracle) : Property IO := propertyM do
   let c ← forAll genOmmersCase
   pure do

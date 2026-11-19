@@ -7,7 +7,9 @@ import EthLib.Engine.Capabilities
 # The methods that read a store: payload bodies, blobs, capabilities
 
 The bodies are a state machine: a chain that grows and is pruned, read by range and by hash.
+
 Its model is a list of blocks by number, with the rules of `shanghai.md` and `amsterdam.md`.
+
 The blob pool is read against a list, with the rules of `cancun.md`, `osaka.md` and `amsterdam.md`.
 -/
 
@@ -58,6 +60,7 @@ def bodyLimit : Nat := 32
 /-- The body of a block as the method of a version answers it, or `null` when not held.
 
 `shanghai.md`: withdrawals are `null` before Shanghai.
+
 `amsterdam.md`: the block access list is `null` before Amsterdam, or when pruned. -/
 def ModelBody.json (version : Nat) (b : ModelBody) : Json :=
   if !b.held then .null else
@@ -303,11 +306,17 @@ def blobsWord {α : Type} (shown : α → String) : Except EngineError α → St
 /-- `engine_getBlobs`, versions 1 to 4, reads the pool as the specification says.
 
 Version 1 answers a blob and its proof or `null` for each hash, and `-38005` from Osaka.
-Version 2 answers every blob with its cell proofs, or `null` alone when one is missing or has
-only the proof of the whole blob.
+
+Version 2 answers every blob with its cell proofs.
+
+It answers `null` alone when one is missing or has only the proof of the whole blob.
+
 Version 3 answers `null` at the place of each missing blob.
-Version 4 answers the cells that the bitarray selects, `null` for a cell that the pool lacks, and
-`null` for a blob of which it holds no cell.
+
+Version 4 answers the cells that the bitarray selects, and `null` for a cell that the pool lacks.
+
+It answers `null` for a blob of which it holds no cell.
+
 More hashes than the limit are `-38004`, and a pool that does not serve answers `null`. -/
 def blobsRead : Property IO := pureIO do
   let c ← forAll genBlobsCase
@@ -413,8 +422,10 @@ def genResponse : Gen (String × Json) := do
 
 /-- A structure of a response reads exactly when it has its fields, each of its type.
 
-`PayloadStatusV1` and `TransitionConfigurationV1` of `paris.md`, `ClientVersionV1` of
-`identification.md`. -/
+The structures:
+
+- `PayloadStatusV1` and `TransitionConfigurationV1` of `paris.md`.
+- `ClientVersionV1` of `identification.md`. -/
 def responsesRead (oracle : Oracle) : Property IO := propertyM do
   let (name, value) ← forAllWith (fun (n, j) => s!"{n} {j.compress}") genResponse
   pure do

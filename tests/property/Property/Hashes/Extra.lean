@@ -3,9 +3,13 @@ import Property.Hashes.Machines
 /-!
 # Models written from the source text, and the branches that random inputs do not reach
 
-Paddings and lengths as arithmetic on `Nat`, the limits of the parameters, AES-192 through the
-general cipher, key derivations past 255 and past 65535 blocks, and what the documented
-preconditions of the multiproof and of the keystore reader leave open.
+The properties here cover:
+
+- Paddings and lengths as arithmetic on `Nat`.
+- The limits of the parameters.
+- AES-192 through the general cipher.
+- Key derivations past 255 and past 65535 blocks.
+- What the documented preconditions of the multiproof and of the keystore reader leave open.
 -/
 
 open Hedgehog Support EthLib EthLib.Cryptography EthLib.Cryptography.Hash
@@ -21,9 +25,15 @@ def genSize : Gen Nat :=
     (2, Gen.nat (.exponential 0 (2 ^ 70)))]
 
 /-- The paddings are those of the standards, as arithmetic on the size alone.
-FIPS 180-4 §5.1.1 and RFC 1320 §3: the padded size is the least multiple of 64 that holds the
-message, one byte and eight bytes of length; the length is the size in bits modulo `2^64`,
-big-endian for SHA-256 and little-endian for RIPEMD-160.
+
+FIPS 180-4 §5.1.1 and RFC 1320 §3:
+
+The padded size is the least multiple of 64 to hold the message, one byte and eight bytes of length.
+
+The length is the size in bits modulo `2^64`.
+
+It is big-endian for SHA-256 and little-endian for RIPEMD-160.
+
 FIPS 202 §5.1: pad10*1 fills up to the next multiple of the rate, with at least one byte. -/
 def paddings : Property IO := pureIO do
   let size ← forAll genSize
@@ -54,8 +64,9 @@ def padded : Property IO := pureIO do
   ensure (keccak.size % 136 == 0 && keccak.size > msg.size && keccak.size ≤ msg.size + 136)
     "Keccak-256"
 
-/-- The cost of scrypt is valid exactly when RFC 7914 §2 says: a power of two, above 1 and
-below `2^(128 r / 8)`. -/
+/-- The cost of scrypt is valid exactly when RFC 7914 §2 says.
+
+That is a power of two, above 1 and below `2^(128 r / 8)`. -/
 def scryptCost : Property IO := pureIO do
   let r ← forAll (Gen.frequency [(4, Gen.nat (.constant 0 4)), (1, Gen.nat (.linear 0 64))])
   let n ← forAll (Gen.frequency [
@@ -66,8 +77,9 @@ def scryptCost : Property IO := pureIO do
   let power := (List.range 1100).any fun k => 2 ^ k == n
   Scrypt.validCost n r === (power && 1 < n && n < 2 ^ (128 * r / 8))
 
-/-- The length limits of the AEAD are those of RFC 8439 §2.8: `2^64 - 1` bytes of additional
-data and `2^38 - 64` bytes of text. -/
+/-- The length limits of the AEAD are those of RFC 8439 §2.8.
+
+They are `2^64 - 1` bytes of additional data and `2^38 - 64` bytes of text. -/
 def aeadLimits : Property IO := pureIO do
   let near (top : Nat) : Gen Nat :=
     Gen.frequency [(1, genNatBits 70), (2, (top + 2 - ·) <$> Gen.nat (.constant 0 4))]
@@ -92,8 +104,10 @@ def tailOf {ε : Type} (result : Except ε ByteArray) : String :=
   | .error _ => "error"
 
 /-- A key derivation whose block index passes one byte and two bytes ends as the reference's.
-The index of PBKDF2 and the counter of the Concatenation KDF are four bytes, and the short
-outputs of the other properties never leave the last one. -/
+
+The index of PBKDF2 and the counter of the Concatenation KDF are four bytes.
+
+The short outputs of the other properties never leave the last one. -/
 def longOutputs (oracle : Oracle) : Property IO := propertyM do
   let (secret, salt) ← forAll (Gen.zip genShort genShort)
   let length ← forAll (Gen.zipWith (fun blocks rest => 32 * blocks + rest)
@@ -107,11 +121,14 @@ def longOutputs (oracle : Oracle) : Property IO := propertyM do
 /-! ## What the documented preconditions leave open
 
 These pass while EthLib behaves as it does now.
+
 None is a deviation from a source: each pins a behaviour that a caller must know. -/
 
 /-- `Merkle.verify` binds the opened values only under the preconditions of `verify_binding`.
-A value opened below another opened node, at a repeated position or outside the tree is not
-read, so the multiproof rebuilds the root whatever that value is. -/
+
+A value opened below another opened node, at a repeated position or outside the tree is not read.
+
+So the multiproof rebuilds the root whatever that value is. -/
 def multiproofUnbound : Property IO := pureIO do
   let (h, leaves) ← forAll (Gen.filter (fun t => t.1 > 0) genTree)
   let tree := levels leaves h
@@ -133,6 +150,7 @@ def multiproofUnbound : Property IO := pureIO do
     === some root
 
 /-- The keystore reader takes a number by its JSON text, not by its value.
+
 `4e0` is read as the version 4 and `4.0` is refused, though both are the integer 4. -/
 def keystoreNumbers : Property IO := pureIO do
   let read (text : String) : Option Nat :=

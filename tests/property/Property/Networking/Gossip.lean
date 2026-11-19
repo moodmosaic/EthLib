@@ -12,8 +12,9 @@ import EthLib.Networking.ReqResp.Encoding
 /-!
 # Gossip names and IDs, request and response payloads, and fork identifiers
 
-Each against a reference in `oracle/networking_codecs.py` or `oracle/networking_snappy.py`,
-written from the networking specification of the consensus layer, EIP-2124 and EIP-6122.
+Each against a reference in `oracle/networking_codecs.py` or `oracle/networking_snappy.py`.
+
+They are written from the networking specification of the consensus layer, EIP-2124 and EIP-6122.
 -/
 
 open Hedgehog Support EthLib EthLib.Networking NetworkingProperty

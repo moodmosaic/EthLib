@@ -22,8 +22,9 @@ def main (args : List String) : IO UInt32 := do
   let cases := casesOf args
   let wanted := args.filter fun arg => arg.toNat?.isNone
   let oracle ← Oracle.start "consensus"
-  -- The scenarios run in madhouse mode whatever the environment says; the scripted order
-  -- runs once beside it.
+  -- The scenarios run in madhouse mode whatever the environment says.
+  --
+  -- The scripted order runs once beside it.
   let scenarios ← allForks.mapM fun (forkName, fork) => do
     let chaos ← blockScenario oracle forkName fork .madhouse
     let script ← blockScenario oracle forkName fork .deterministic
@@ -36,8 +37,11 @@ def main (args : List String) : IO UInt32 := do
       (depositTree oracle).withTests cases)]),
     ("scenario", scenarios.flatten),
     ("epoch", stepProperties oracle cases),
-    -- On any registry most steps are refused or do nothing at the later forks, which need
-    -- committees: the same steps on settled validators at a late slot, and on a large registry.
+    -- The later forks need committees.
+    --
+    -- On any registry most steps are refused or do nothing at those forks.
+    --
+    -- So the same steps also run on settled validators at a late slot, and on a large registry.
     ("epoch-settled", stepProperties oracle cases genOperationState ", settled validators" ++
       stepProperties oracle cases genLargeState ", a large registry"),
     ("operations", callProperties oracle cases genOperationState operations),
@@ -61,8 +65,9 @@ def main (args : List String) : IO UInt32 := do
       whole || wantedParts.any fun part => (label.splitOn part).length > 1
     if !properties.isEmpty then
       ok := (← checkGroup s!"consensus: {name}" properties) && ok
-      -- How often the reference accepted, left unchanged, refused and skipped: a group that
-      -- only refuses tests little.
+      -- How often the reference accepted, left unchanged, refused and skipped.
+      --
+      -- A group that only refuses tests little.
       oracle.stdin.putStrLn "stats"
       oracle.stdin.flush
       let counts := (← oracle.stdout.getLine).trimAsciiEnd

@@ -98,8 +98,11 @@ structure NonceModel where
 
 /-- The candidates of EthLib's generator are those of RFC 6979 section 3.2, step h.
 
-The oracle's generator rejects after every candidate, so the model allows a `next` only
-right after a `reject` or at the start, and a `reject` only right after a `next`. -/
+The oracle's generator rejects after every candidate.
+
+So the model allows a `next` only right after a `reject` or at the start.
+
+It allows a `reject` only right after a `next`. -/
 def nonces (oracle : Oracle) :
     StateMachine NonceModel NonceStep (Rfc6979.NonceState × List Nat) IO where
   initState := do
@@ -191,8 +194,11 @@ instance : Command Sign Signers Oracle IO where
     (Gen.frequency [(1, pure ByteArray.empty), (1, pure (beBytes 1 7)), (2, genBytes
         (.linear 0 12))])
 
-/-- A signature made earlier, with one bit of the key, message or signature changed, or under
-another registered key: it must be refused, as the oracle refuses it, and nothing changes. -/
+/-- A signature made earlier, with one bit of the key, message or signature changed.
+
+The other choice is the same signature under another registered key.
+
+Either must be refused, as the oracle refuses it, and nothing changes. -/
 structure Tamper where
   oracle : Oracle
   pick : Nat
@@ -220,8 +226,13 @@ instance : Command Tamper Signers Oracle IO where
       (Gen.zip (Gen.nat (.constant 0 3)) (Gen.nat (.constant 0 767)))
     pure ⟨oracle, pick, field, place⟩
 
-/-- Every registered key signs one message: the aggregate verifies exactly when the oracle
-says so, which is unless the public keys sum to infinity, and never without its last signer. -/
+/-- Every registered key signs one message.
+
+The aggregate verifies exactly when the oracle says so.
+
+The oracle says so unless the public keys sum to infinity.
+
+The aggregate never verifies without its last signer. -/
 structure AggregateSame where
   oracle : Oracle
   msg : ByteArray
@@ -337,8 +348,9 @@ instance : Command AddBlob Store Env IO where
   label c := s!"ADD_BLOB({repr c.spec})"
   build env := AddBlob.mk env <$> genBlob false
 
-/-- Every stored blob verifies in one batch; with two proofs exchanged it verifies exactly
-when the two are equal. -/
+/-- Every stored blob verifies in one batch.
+
+With two proofs exchanged the batch verifies exactly when the two are equal. -/
 structure VerifyAll where
   env : Env
   swap : Bool
@@ -360,8 +372,9 @@ instance : Command VerifyAll Store Env IO where
   label c := s!"VERIFY_ALL({c.swap})"
   build env := VerifyAll.mk env <$> Gen.bool
 
-/-- A sample of cells across the stored blobs verifies; with one cell index moved it verifies
-only as c-kzg says. -/
+/-- A sample of cells across the stored blobs verifies.
+
+With one cell index moved the sample verifies only as c-kzg says. -/
 structure Sample where
   env : Env
   picks : List (Nat × Nat)
@@ -392,6 +405,7 @@ instance : Command Sample Store Env IO where
     Sample.mk env picks <$> Gen.bool
 
 /-- Lose up to half of the cells of a blob: recovery gives back the cells and proofs stored.
+
 With one cell more lost, recovery fails. -/
 structure LoseAndRecover where
   env : Env

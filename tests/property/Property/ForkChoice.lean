@@ -10,8 +10,10 @@ import Property.ForkChoice.LightClient
     lake exe forkchoice-property 1000
     ONLY=phase0 lake exe forkchoice-property 1000   # The properties whose name holds a word.
 
-The group `forkchoice: findings` holds the properties that are expected to fail: each shows a
-place where EthLib and its source differ, with the counterexample.
+The group `forkchoice: findings` holds the properties that are expected to fail.
+
+Each shows a place where EthLib and its source differ, with the counterexample.
+
 Its failures do not change the exit code.
 -/
 
@@ -19,8 +21,8 @@ open Hedgehog Support ForkChoiceProperty
 
 /-- The forks at which the store runs, with their names in the pyspec. -/
 def forks : List (EthLib.Base.Fork × String) :=
-  [(.glamsterdam, "gloas"), (.fusaka, "fulu"), (.pectra, "electra"), (.dencun, "deneb"), (.shapella, "capella"),
-    (.bellatrix, "bellatrix"), (.altair, "altair"), (.phase0, "phase0")]
+  [(.glamsterdam, "gloas"), (.fusaka, "fulu"), (.pectra, "electra"), (.dencun, "deneb"),
+    (.shapella, "capella"), (.bellatrix, "bellatrix"), (.altair, "altair"), (.phase0, "phase0")]
 
 def main (args : List String) : IO UInt32 := do
   let cases := casesOf args

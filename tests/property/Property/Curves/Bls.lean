@@ -5,7 +5,9 @@ import EthLib.Cryptography.Bls
 # BLS12-381 against py_ecc, arkworks and milagro
 
 The encodings are the Zcash ones of the BLS signature draft, section 2.5.
+
 The signatures are the proof-of-possession scheme of that draft, and the wrappers of Ethereum.
+
 The inputs are valid points, keys and signatures, then changed at one place.
 -/
 
@@ -98,8 +100,11 @@ def sqrt2 : Property IO := pureIO do
 
 /-! ## Encodings -/
 
-/-- 48 bytes near an encoding of `G1`: a point of the subgroup, a point of the curve outside
-it, or neither, with the three flags and the field bound changed. -/
+/-- 48 bytes near an encoding of `G1`.
+
+They are a point of the subgroup, a point of the curve outside it, or neither.
+
+Each comes with the three flags and the field bound changed. -/
 def genG1Bytes : Gen ByteArray := do
   let k ← genNear r
   let valid : ByteArray := ⟨(G1.compress (G1.mulNat G1.generator k)).toArray⟩
@@ -192,8 +197,9 @@ def genG2 : Gen G2 :=
       (G2.uncompress (vec 96 ((bs.set! 0 (bs[0]! &&& 0x1f ||| 0x80)).set! 48 (bs[48]! &&& 0x0f)))
         ).toOption) (genBytesN 96))]
 
-/-- The sum, the double, the negative and the multiple on `G1` are py_ecc's, on the whole
-curve and in every mix of affine and Jacobian forms. -/
+/-- The sum, the double, the negative and the multiple on `G1` are py_ecc's.
+
+This holds on the whole curve and in every mix of affine and Jacobian forms. -/
 def g1Group (oracle : Oracle) : Property IO := propertyM do
   let (a, b) ← forAllWith (fun (a, b) => s!"{render1 a} {render1 b}") (Gen.zip genG1 genG1)
   let k ← forAll (genNear r)

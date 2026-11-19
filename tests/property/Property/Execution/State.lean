@@ -3,12 +3,14 @@ import Property.Execution.Common
 /-!
 # The tracker of writes, as a state machine
 
-The tracker keeps the writes of a block and of a transaction apart from the state, with snapshots
-for the calls that fail.
+The tracker keeps the writes of a block and of a transaction apart from the state.
+
+It keeps snapshots for the calls that fail.
+
 Two references run beside it on random sequences of operations.
 
-- A model here, written from the text of `state.py` of execution-specs: one flat state, copied
-  whole at each snapshot.
+- A model here, written from the text of `state.py` of execution-specs.
+  It is one flat state, copied whole at each snapshot.
 - `state.py` itself, in the oracle, with its own tries and its own snapshots.
 
 After every operation the three agree on what a transaction can read of each account and slot.
@@ -187,8 +189,9 @@ where
 
 /-- What a transaction reads of the model, one word for each account.
 
-The word holds the account, whether it has storage and is alive, and for each key the word of
-its storage, the word before the transaction, and the transient word. -/
+The word holds the account, and whether it has storage and is alive.
+
+For each key it holds the storage word, the word before the transaction, and the transient word. -/
 def TrackerModel.reads (m : TrackerModel) : List String :=
   (List.range addresses.length).map fun a =>
     let account := match m.now.account a with
@@ -204,6 +207,7 @@ def TrackerModel.reads (m : TrackerModel) : List String :=
 /-- The model: operations on a few accounts and keys, with small balances so that accounts empty.
 
 A rollback and a commit need an open snapshot, and a transaction ends with none open.
+
 An account is touched, and the touched empty accounts destroyed, only before Paris. -/
 def genOp (m : TrackerModel) : Gen Op :=
   let account := Gen.nat (.constant 0 (addresses.length - 1))
@@ -327,7 +331,9 @@ def TrackerModel.stateWords (m : TrackerModel) : List String :=
 /-- The tracker reads as the model after every operation.
 
 The model copies its whole state at a snapshot, and the tracker keeps writes in layers.
+
 When a transaction ends, the state that the block's writes give is the state of the model.
+
 A state holds no storage for an account that it does not hold. -/
 def trackerMachine : StateMachine TrackerModel Op Tracker IO where
   toModel := trackerModel
@@ -375,8 +381,9 @@ def runBeside (ctx : BesideContext) (op : Op) (s : Beside) : TestT IO Beside := 
       let state := tracker.tx.parent.applyChanges
       pure (reads ++ [orError (hexV <$> (stateRoot keccak256 state).mapError fun _ => ())])
     | _ => pure reads
-  -- The reference has transient storage from Dencun and the original word from Constantinople,
-  -- so those words are compared from there.
+  -- The reference has transient storage from Dencun and the original word from Constantinople.
+  --
+  -- So those words are compared from there.
   let strip (word : String) : String :=
     ";".intercalate ((word.splitOn ";").map fun part =>
       match part.splitOn "," with
@@ -544,6 +551,7 @@ instance : Command EndTransaction Beside BesideContext IO where
 /-- The tracker reads as `state.py` of execution-specs after every command, at a fork.
 
 The scenario draws random sequences of the commands, and each runs on both sides.
+
 At the end of a transaction the state root of the block's writes is the reference's. -/
 def trackerScenario (mode : Mode) (ctx : BesideContext) : Property IO :=
   scenario mode ctx [
@@ -573,8 +581,11 @@ inductive Tamper where
 /-- An answer of `eth_getProof` holds against the state root exactly when it is true.
 
 The state comes from a sequence of operations on the tracker.
-The answer that EthLib builds for an account and some slots verifies, and shows what the state
-holds: the account or its absence, and each slot as set or not.
+
+The answer that EthLib builds for an account and some slots verifies.
+
+It shows what the state holds: the account or its absence, and each slot as set or not.
+
 An answer with one field changed is refused. -/
 def accountProofs : Property IO := pureIO do
   let (model, ops) ← forAll (trackerModel.sequence (.linear 1 40))
@@ -638,6 +649,7 @@ namespace ExecutionProperty
 /-- An answer of `eth_getProof` as go-ethereum gives it for an account with no storage holds.
 
 go-ethereum answers a slot of an empty storage trie with the word 0 and no proof node.
+
 EthLib refuses that answer, so this property fails: see the findings. -/
 def emptyStorageAnswer : Property IO := pureIO do
   let balance ← forAll (Gen.nat (.constant 1 100))
@@ -648,7 +660,8 @@ def emptyStorageAnswer : Property IO := pureIO do
   let .ok stateRootHash := stateRoot keccak256 state | failWith "no state root"
   let .ok answer := AccountProof.ofState keccak256 state address [slotAt key]
     | failWith "no answer"
-  let geth := { answer with storageProof := answer.storageProof.map fun (s : StorageProof) => { s with proof := [] } }
+  let geth := { answer with
+    storageProof := answer.storageProof.map fun (s : StorageProof) => { s with proof := [] } }
   match geth.verify keccak256 stateRootHash with
   | .ok outcome => outcome === .present [.absent]
   | .error error => failWith s!"EthLib refuses the answer: {repr error}"

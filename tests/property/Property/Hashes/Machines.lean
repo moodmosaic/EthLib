@@ -4,10 +4,19 @@ import Property.Hashes.Misc
 /-!
 # State machines
 
-Two machines with their transitions in one type (`StateMachine`), where the specification
-fixes the operations: the incremental Keccak-256 hasher, and a counter-mode stream.
-Two scenarios of commands (`Command`), run in madhouse mode, where the operations are a set
-that grows: the nonce generator of RFC 6979, and a session that seals and opens packets.
+Two machines with their transitions in one type (`StateMachine`):
+
+- The incremental Keccak-256 hasher.
+- A counter-mode stream.
+
+There the specification fixes the operations.
+
+Two scenarios of commands (`Command`), run in madhouse mode:
+
+- The nonce generator of RFC 6979.
+- A session that seals and opens packets.
+
+There the operations are a set that grows.
 -/
 
 open Hedgehog Support EthLib EthLib.Cryptography
@@ -24,8 +33,9 @@ inductive HashStep where
   | digest
   deriving Repr
 
-/-- A chunk whose end falls on, just before or just after the end of a block, given the bytes
-already absorbed; or any chunk. -/
+/-- Given the bytes already absorbed, a chunk that ends near the end of a block, or any chunk.
+
+Near means on, just before or just after the end. -/
 def genChunk (absorbed : Nat) : Gen ByteArray := do
   let toBoundary := 136 - absorbed % 136
   let size ← Gen.frequency [
@@ -35,9 +45,11 @@ def genChunk (absorbed : Nat) : Gen ByteArray := do
     (2, Gen.nat (.linear 0 300))]
   genBytesOf size
 
-/-- The hasher against the message so far: after any sequence of chunks its digest is the
-reference's Keccak-256 of their concatenation, it holds fewer bytes than a block, and those
-bytes are the tail of the message. -/
+/-- The hasher against the message so far.
+
+After any sequence of chunks its digest is the reference's Keccak-256 of their concatenation.
+
+It holds fewer bytes than a block, and those bytes are the tail of the message. -/
 def hasherMachine (oracle : Oracle) : StateMachine ByteArray HashStep Hash.Keccak.Hasher256 IO where
   initState := pure .empty
   transitions s := Gen.frequency [(4, .absorb <$> genChunk s.size), (1, pure .digest)]
@@ -81,8 +93,10 @@ def StreamStep.data' : StreamStep → ByteArray
   | .tail data => data
 
 /-- A stream encrypted piece by piece is the stream encrypted at once by the reference.
-The system keeps the next counter block, which it advances with the incrementing function, so
-a piece that starts after the counter wrapped must continue where the reference is. -/
+
+The system keeps the next counter block, which it advances with the incrementing function.
+
+So a piece that starts after the counter wrapped must continue where the reference is. -/
 def streamMachine (oracle : Oracle) :
     StateMachine Stream StreamStep (Aes.Block × ByteArray) IO where
   initState := do
@@ -166,8 +180,9 @@ instance : Command Reject Drbg Oracle IO where
   label _ := "REJECT"
   build oracle := pure ⟨oracle⟩
 
-/-- Any sequence of seeding, drawing and rejecting leaves the generator where step h of
-RFC 6979 §3.2 leaves the reference. -/
+/-- Any sequence of seeding, drawing and rejecting leaves the generator where the reference is.
+
+Step h of RFC 6979 §3.2 leaves the reference there. -/
 def drbgScenario (mode : Mode) (oracle : Oracle) : Property IO :=
   scenario mode oracle [Command.gen Seed, Command.gen Next, Command.gen Reject,
     Command.gen Next, Command.gen Reject]
@@ -299,8 +314,9 @@ instance : Command Rekey Session Oracle IO where
     let top ← Gen.element [2 ^ 8, 2 ^ 32, 2 ^ 64, 2 ^ 96]
     pure ⟨← genBytesOf 32, top - 1 - (← Gen.nat (.constant 0 2))⟩
 
-/-- In any order of sealing, opening, tampering and rekeying, both AEADs seal as the reference,
-every packet in flight opens to what was sealed, and a tampered packet is refused by both. -/
+/-- In any order of sealing, opening, tampering and rekeying, both AEADs seal as the reference.
+
+Every packet in flight opens to what was sealed, and a tampered packet is refused by both. -/
 def sessionScenario (mode : Mode) (oracle : Oracle) : Property IO :=
   scenario mode oracle [Command.gen SealGcm, Command.gen SealChaCha, Command.gen Open,
     Command.gen OpenTampered, Command.gen Rekey, Command.gen SealGcm, Command.gen OpenTampered]

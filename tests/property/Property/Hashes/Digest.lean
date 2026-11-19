@@ -23,8 +23,10 @@ def keccak512 (oracle : Oracle) : Property IO := propertyM do
 /-- The sponge at each rate of the Keccak family is the reference's: 144, 136, 104 and 72 bytes.
 
 The state after the last block holds the digest in its first bytes.
-At 144 bytes a block fills lane 17, which Keccak-256 and Keccak-512 leave to the capacity: a
-block step that XORs only the lanes of Keccak-256 drops those bytes. -/
+
+At 144 bytes a block fills lane 17, which Keccak-256 and Keccak-512 leave to the capacity.
+
+A block step that XORs only the lanes of Keccak-256 drops those bytes. -/
 def keccakRates (oracle : Oracle) : Property IO := propertyM do
   let bits ← forAll (Gen.element [224, 256, 384, 512])
   let rate := 200 - bits / 4

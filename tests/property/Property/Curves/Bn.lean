@@ -5,6 +5,7 @@ import EthLib.Cryptography.AltBn128
 # alt_bn128 against py_ecc and a model of the group law
 
 EIP-196 gives the curve and EIP-197 the pairing check.
+
 The points are multiples of the generators, often equal or opposite, and the point at infinity.
 -/
 

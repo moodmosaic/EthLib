@@ -4,8 +4,9 @@ import EthLib.Serialization.JsonRpc
 /-!
 # The base types of the Engine API, as JSON
 
-`DATA` and `QUANTITY` against the patterns of `base-types.yaml`, which EthLib cites, and against
-the two patterns of the section Encoding of `common.md`, which is the Engine API's own text.
+`DATA` and `QUANTITY` against the patterns of `base-types.yaml`, which EthLib cites.
+
+Also against the two patterns of the section Encoding of `common.md`, the Engine API's own text.
 -/
 
 open Hedgehog Support EthLib EthLib.Base EthLib.Serialization.JsonRpc

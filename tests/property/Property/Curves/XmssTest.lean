@@ -5,8 +5,11 @@ import EthLib.Cryptography.Xmss
 # leanXMSS against a model of its specification
 
 The model (`oracle/curves_xmss.py`) is written from the formulas of the specification draft.
-Verification runs on the valid signatures of `tests/cryptography/xmss/verify`, changed at one
-place, since making a signature builds `2^16` one-time keys.
+
+Verification runs on the valid signatures of `tests/cryptography/xmss/verify`, changed at one place.
+
+The reason is that making a signature builds `2^16` one-time keys.
+
 The parts of signing that are cheap run in full: one one-time signature, and a small subtree.
 -/
 
@@ -48,8 +51,9 @@ def verdict (s : Signed) : String :=
     else "error"
   | _, _ => "error"
 
-/-- The offsets where the fields of a signature start: the index, then per layer the
-randomizer, the 58 chain values and the 16 siblings. -/
+/-- The offsets where the fields of a signature start.
+
+The fields are the index, then per layer the randomizer, the 58 chain values and the 16 siblings. -/
 def fieldStarts : List Nat :=
   [0] ++ [4, 1204].flatMap fun base =>
     [base] ++ (List.range 58).map (base + 16 + 16 * ·) ++
@@ -110,8 +114,11 @@ def Change.apply (s : Signed) : Change → Signed
   | .msgSize delta => { s with msg := resize s.msg delta }
   | .pkSize delta => { s with pk := resize s.pk delta }
 
-/-- Verification accepts a valid signature, and agrees with the model on every signature
-changed at one place: a bit of any field, the leaf index, the order of two values, a length. -/
+/-- Verification accepts a valid signature.
+
+It agrees with the model on every signature changed at one place.
+
+The change is a bit of any field, the leaf index, the order of two values, or a length. -/
 def verifies (oracle : Oracle) (vectors : List Signed) : Property IO := propertyM do
   let which ← forAll (Gen.nat (.constant 0 (vectors.length - 1)))
   let change ← forAll genChange
@@ -189,8 +196,11 @@ def folds (oracle : Oracle) : Property IO := propertyM do
     hexVec got === (← oracle.ask ["xmssfold", hex pp, toString layer.toNat, toString e, hex leaf,
       hex path])
 
-/-- The leaf of a claimed one-time signature is the model's: the digest must be a codeword,
-which a search over the randomizer finds here, and each chain walks from its digit. -/
+/-- The leaf of a claimed one-time signature is the model's.
+
+The digest must be a codeword, which a search over the randomizer finds here.
+
+Each chain walks from its digit. -/
 def otsLeaves (oracle : Oracle) : Property IO := propertyM do
   let (pp, msg) ← forAllWith (fun (a, b) => s!"{hex a} {hex b}")
     (Gen.zip (genBytesN 16) (Gen.frequency [(1, genBytesN 32), (1, genBytesN 16)]))
@@ -230,8 +240,11 @@ def subtrees (oracle : Oracle) : Property IO := propertyM do
     s!"{hexVec pp} {hexVec got}" === (← oracle.ask ["xmsskey", hex seed, toString layer.toNat,
       toString level, toString j])
 
-/-- One one-time signature is the model's: the least randomizer trial whose digest is a
-codeword, and each chain revealed at its digit; its leaf is the public leaf of the key. -/
+/-- One one-time signature is the model's.
+
+It has the least randomizer trial whose digest is a codeword, and each chain revealed at its digit.
+
+Its leaf is the public leaf of the key. -/
 def otsSigns (oracle : Oracle) : Property IO := propertyM do
   let seed ← forAllWith hex (genBytesN 32)
   let msg ← forAllWith hex (Gen.frequency [(1, genBytesN 32), (1, genBytesN 16)])

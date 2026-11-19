@@ -4,11 +4,17 @@ import EthLib.Cryptography.Sphincs
 /-!
 # leanSPHINCS: signing against verification
 
-The reference is a model of verification (`oracle/curves_sphincs.py`), written from FIPS 205
-and the formulas of the scheme, and checked against the vectors of the repository.
-A signature of a key verifies, any single bit changed in the signature, the message or the
-key is refused, as the model refuses it, and the fields of the digest are the bits that
-FIPS 205 Algorithm 19 names.
+The reference is a model of verification (`oracle/curves_sphincs.py`).
+
+It is written from FIPS 205 and the formulas of the scheme.
+
+It is checked against the vectors of the repository.
+
+A signature of a key verifies.
+
+Any single bit changed in the signature, the message or the key is refused, as in the model.
+
+The fields of the digest are the bits that FIPS 205 Algorithm 19 names.
 -/
 
 open Hedgehog Support EthLib EthLib.Cryptography
@@ -17,15 +23,19 @@ namespace CurvesProperty.SphincsTest
 
 open Sphincs
 
-/-- The offsets where the fields of a signature start: the randomizer, each FORS opening and
-its path nodes, then per layer the counter, the chain values and the siblings. -/
+/-- The offsets where the fields of a signature start.
+
+The fields are the randomizer, then each FORS opening and its path nodes.
+
+Then per layer come the counter, the chain values and the siblings. -/
 def fieldStarts : List Nat :=
   [0] ++ (List.range (24 * 11)).map (16 + 16 * ·) ++
     [(4240, 8), (5396, 8), (6552, 10)].flatMap fun (base, height) =>
       [base] ++ (List.range (64 + height)).map (base + 4 + 16 * ·)
 
-/-- A key signs, the signature verifies and encodes to 7740 bytes that decode back, and a
-signature, message or key with one bit changed, or of another length, is refused. -/
+/-- A key signs, and the signature verifies and encodes to 7740 bytes that decode back.
+
+A signature, message or key with one bit changed, or of another length, is refused. -/
 def signsAndVerifies (oracle : Oracle) : Property IO := propertyM do
   let (seed, msg) ← forAllWith (fun (a, b) => s!"{hex a} {hex b}")
     (Gen.zip (Gen.frequency [(1, pure (beBytes 32 0)), (3, genBytesN 32)])
@@ -68,8 +78,11 @@ def signsAndVerifies (oracle : Oracle) : Property IO := propertyM do
         let width := if start == 4240 || start == 5396 || start == 6552 then 32 else 128
         agree pkBytes msg (flipBit sigBytes (8 * start + bit % width)) false
 
-/-- The fields of the digest are those of FIPS 205 Algorithm 19: 24 leaves of 10 bits from
-the first 30 bytes, most significant bit first, then a tree of 18 bits and a leaf of 8. -/
+/-- The fields of the digest are those of FIPS 205 Algorithm 19.
+
+First come 24 leaves of 10 bits from the first 30 bytes, most significant bit first.
+
+Then come a tree of 18 bits and a leaf of 8. -/
 def digestFields : Property IO := pureIO do
   let bytes ← forAllWith hex (Gen.frequency [(1, pure (beBytes 34 0)),
     (1, pure ⟨Array.replicate 34 0xff⟩), (4, genBytesN 34)])

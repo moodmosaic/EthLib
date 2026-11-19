@@ -3,16 +3,23 @@ import Property.Consensus.Operations
 /-!
 # Requests that need a large registry
 
-A consolidation is queued only when the churn left for consolidations exceeds one minimal
-activation balance.
-On the registries of `genOperationState` it never does: the balance churn is at its floor, and the
-churn of activations and exits takes all of it.
-So `process_consolidation_request` passed there while it tested only its refusals and the switch
-to compounding credentials.
+A consolidation is queued only when one condition holds.
+
+The churn left for consolidations must exceed one minimal activation balance.
+
+On the registries of `genOperationState` it never does.
+
+There the balance churn is at its floor, and the churn of activations and exits takes all of it.
+
+So `process_consolidation_request` passed there.
+
+But there it tested only its refusals and the switch to compounding credentials.
 
 Here the registry holds validators of 2048 ETH, enough of them for the churn to leave room.
-Each property asks, with `cover`, that its call changes the state in a share of the cases, so a
-generator that no longer reaches the rule fails the run.
+
+Each property asks, with `cover`, that its call changes the state in a share of the cases.
+
+So a generator that no longer reaches the rule fails the run.
 -/
 
 open Hedgehog Support EthLib EthLib.Consensus
@@ -53,15 +60,17 @@ def genConsolidation (same : Bool) : Gen (List String) := do
 
 /-- The property with a minimum of cases in which its call changes the state.
 
-A class named twice keeps the greater minimum, so naming it here with nothing counted adds the
-minimum to the class that the comparison counts. -/
+A class named twice keeps the greater minimum.
+
+So naming it here with nothing counted adds the minimum to the class that the comparison counts. -/
 def changing (minimum : Nat) (p : Property IO) : Property IO :=
   { p with test := (fun test => do
       cover minimum "the state changed" false
       test) <$> p.test }
 
-/-- A call of `operations` under another name, on these states, with a minimum of cases in
-which it changes the state. -/
+/-- A call of `operations` under another name, on these states.
+
+It must change the state in a minimum of cases. -/
 def requestProperty (oracle : Oracle) (name call : String) (arguments : Gen (List String))
     (minimum : Nat) : List (String × Property IO) :=
   match operations.find? (·.name = call) with

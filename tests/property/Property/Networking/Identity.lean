@@ -7,8 +7,9 @@ import EthLib.Networking.Noise
 /-!
 # libp2p identities and the Noise XX handshake
 
-Signatures against libsecp256k1 (strict DER, low `s`), and a whole handshake against the
-`noiseprotocol` package.
+Signatures against libsecp256k1 (strict DER, low `s`).
+
+Also a whole handshake against the `noiseprotocol` package.
 -/
 
 open Hedgehog Support EthLib EthLib.Networking NetworkingProperty

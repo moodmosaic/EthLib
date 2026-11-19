@@ -4,8 +4,12 @@ import EthLib.Consensus.Transition.Upgrade
 /-!
 # Operations, mutators and accessors on a state
 
-Each call takes a state and an argument that the oracle builds from a few numbers: an exit of
-validator 3 signed or not, an attestation of a committee with one bit too many.
+Each call takes a state and an argument that the oracle builds from a few numbers.
+
+One example is an exit of validator 3, signed or not.
+
+Another is an attestation of a committee with one bit too many.
+
 EthLib must refuse what consensus-specs refuses and reach the same state otherwise.
 -/
 
@@ -223,13 +227,24 @@ def blocks : List Call := [
     withArgument (BeaconBlock Preset.minimal fork) bytes fun block =>
       .ofState (processBlock Config.minimal checks (ExecutionEngine.constant true) s block)⟩]
 
-/-- A block from Gloas, whole: the parent's payload, header, withdrawals, bid, RANDAO, deposit
-vote, operations with payload attestations, sync aggregate.
+/-- A block from Gloas, whole.
 
-The numbers say what is wrong with it, mostly nothing: the slot, the proposer, the parent root,
-the RANDAO reveal, the parent's payload (full, empty, full with other requests, empty with
-requests), the kind of request, a seed, the sync aggregate, the slot of the bid, and the number
-and the kind of the payload attestations. -/
+It has the parent's payload, header, withdrawals, bid, RANDAO and deposit vote.
+
+It also has the operations with payload attestations, and the sync aggregate.
+
+The numbers say what is wrong with it, mostly nothing:
+
+- The slot.
+- The proposer.
+- The parent root.
+- The RANDAO reveal.
+- The parent's payload (full, empty, full with other requests, empty with requests).
+- The kind of request.
+- A seed.
+- The sync aggregate.
+- The slot of the bid.
+- The number and the kind of the payload attestations. -/
 def gloasBlocks : List Call := [
   ⟨"process_block", forksFrom .glamsterdam,
     genWord [num (Gen.frequency [(9, pure 0), (1, pure 1)]),

@@ -4,15 +4,21 @@ import Hedgehog
 # A reference implementation in another process
 
 EthLib's theorems say what its definitions guarantee, and they are stated about those definitions.
+
 They cannot say that a definition is the function its source defines.
+
 A reference implementation written apart from EthLib can, on the inputs it is given.
 
-An oracle is a Python program under `oracle/` that reads one command per line and answers each with
-one line.
+An oracle is a Python program under `oracle/`.
+
+It reads one command per line and answers each with one line.
+
 The words of a line are separated by tabs, and bytes are in hexadecimal, `-` for none.
+
 An answer that starts with `error` says the reference refused the input.
 
 The interpreter is `.venv/bin/python` of this package, or the one `ETHLIB_ORACLE_PYTHON` names.
+
 `oracle/requirements.txt` lists what it needs.
 -/
 

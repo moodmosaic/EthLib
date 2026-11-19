@@ -4,6 +4,7 @@ import Property.Execution.Common
 # The Merkle Patricia Trie, against execution-specs and py-trie
 
 The keys are short and over few bytes, so that they share prefixes and one is a prefix of another.
+
 The values lie on both sides of the 32 bytes at which a parent holds a child by its hash.
 -/
 
@@ -66,8 +67,9 @@ def proofAnswer (result : Except ProofError (Option ByteArray)) : String :=
 
 /-- The proof of a key is the proof of py-trie, and it shows the value of the key or its absence.
 
-py-trie lists every node on the path, and EthLib the ones that their parent holds by hash, so the
-oracle keeps those of py-trie. -/
+py-trie lists every node on the path, and EthLib the ones that their parent holds by hash.
+
+So the oracle keeps those of py-trie. -/
 def trieProof (oracle : Oracle) : Property IO := propertyM do
   let writes ← forAllWith showWrites genWrites
   let key ← forAllWith hex (Gen.choice [genKeyBytes,
@@ -125,9 +127,14 @@ def ProofChange.apply (proof other : List ByteArray) : ProofChange → List Byte
 
 /-- A proof that EthLib accepts gives the value of the key in the trie, whatever was done to it.
 
-The proofs are those of a key, changed: a node dropped, repeated or rewritten, a byte changed, or
-the tail of the proof of another key.
+The proofs are those of a key, changed:
+
+- A node dropped, repeated or rewritten.
+- A byte changed.
+- The tail of the proof of another key.
+
 A proof that still reads the trie's nodes may be accepted, and then it must not lie.
+
 py-trie reads the same proof, and where both accept, they give the same value. -/
 def trieProofSound (oracle : Oracle) : Property IO := propertyM do
   let writes ← forAllWith showWrites genWrites
@@ -188,8 +195,10 @@ def trieModel : Model TrieModel TrieWrite where
 /-- EthLib's trie under writes, beside py-trie under the same writes.
 
 py-trie changes its nodes in place at each write, and EthLib builds the root from the entries.
-After each write the two roots are equal, EthLib holds the entries of the model, and its root does
-not depend on the order in which the entries were set. -/
+
+After each write the two roots are equal, and EthLib holds the entries of the model.
+
+EthLib's root does not depend on the order in which the entries were set. -/
 def trieMachine (oracle : Oracle) : StateMachine TrieModel TrieWrite Trie IO where
   toModel := trieModel
   initSut _ := do
@@ -217,9 +226,12 @@ namespace ExecutionProperty
 /-- The empty proof shows that a key is absent from the empty trie, as it does for py-trie.
 
 The empty trie has no node, so a proof by "the nodes on the path" (EIP-1186) lists none.
+
 py-trie builds the empty proof, and reads it as the absence of the key.
-EthLib builds the proof `[0x80]` and refuses the empty one, so this property fails: see the
-findings. -/
+
+EthLib builds the proof `[0x80]` and refuses the empty one, so this property fails.
+
+See the findings. -/
 def emptyTrieProof (oracle : Oracle) : Property IO := propertyM do
   let key ← forAllWith hex genKeyBytes
   let secured ← forAll Gen.bool

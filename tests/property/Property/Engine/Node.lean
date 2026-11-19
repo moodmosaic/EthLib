@@ -5,14 +5,24 @@ import EthLib.Engine.GetPayload
 # A node, driven by the methods of the Engine API
 
 Each method is a command: `engine_newPayload`, `engine_forkchoiceUpdated` and `engine_getPayload`.
-The state is the node: the tree of payloads that EthLib reads, the builds, and the model beside
-them, which is the tree by index of the forkchoice state machine.
 
-EthLib gives each method as a function of what the node holds, so the commands hold the node
-together the way a client would: a payload that passes the checks enters the tree, an update moves
-the head, and attributes that pass begin a build.
-The oracle writes every payload and its block hash, so a build that comes back through
-`engine_getPayload` is compared with JSON that EthLib did not write.
+The state is the node.
+
+It is the tree of payloads that EthLib reads, the builds, and the model beside them.
+
+The model is the tree by index of the forkchoice state machine.
+
+EthLib gives each method as a function of what the node holds.
+
+So the commands hold the node together the way a client would:
+
+- A payload that passes the checks enters the tree.
+- An update moves the head.
+- Attributes that pass begin a build.
+
+The oracle writes every payload and its block hash.
+
+So a build returned by `engine_getPayload` is compared with JSON that EthLib did not write.
 -/
 
 open Hedgehog Support EthLib EthLib.Base EthLib.Engine
@@ -59,8 +69,9 @@ def forkchoiceVersionAt (time : Nat) : Nat :=
 
 /-- The versions of `engine_getPayload` that return a payload built at a time on the test chain.
 
-`paris.md` to `amsterdam.md`: 1 for Paris, 2 for Paris and Shanghai, 3 for Cancun, 4 for Prague,
-5 for Osaka, 6 for Amsterdam. -/
+By `paris.md` to `amsterdam.md`, version 1 is for Paris, 2 for Paris and Shanghai, and 3 for Cancun.
+
+Version 4 is for Prague, 5 for Osaka, and 6 for Amsterdam. -/
 def getPayloadVersionsAt (time : Nat) : List Nat :=
   if time < 1000 then [1, 2] else if time < 2000 then [2] else if time < 3000 then [3]
   else if time < 4000 then [4] else if time < 7000 then [5] else if time < 8000 then [6] else []
@@ -161,8 +172,9 @@ instance : Command NewPayloadCmd Node Oracle IO where
     let got := newPayloadOutcome version params
     annotate s!"  version {version} at time {time}: {got}, allowed {allowed}"
     ensure (allowed.contains got) "newPayload: an answer that the specification does not allow"
-    -- A payload that passes the checks is held; its execution, which the node of the tests does
-    -- not run, says whether it is valid.
+    -- A payload that passes the checks is held.
+    --
+    -- Its execution, which the node of the tests does not run, says whether it is valid.
     if got != "SYNCING" then pure node else
     match params.getArrVal? 0 >>= (·.getObjVal? "blockHash") with
     | .ok hash =>

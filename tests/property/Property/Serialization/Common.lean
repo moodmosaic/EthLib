@@ -7,6 +7,7 @@ import EthLib.Serialization.Rlp
 # Generators and text forms of the serialization layer
 
 An SSZ type and a value of it are generated together, by a recursion on a depth.
+
 Both are sent to the oracle as JSON, which is also how a counterexample is shown.
 -/
 

@@ -4,8 +4,11 @@ import EthLib.Engine.Jwt
 /-!
 # The authentication of the Engine API
 
-Tokens that are almost valid, against a model of the Engine profile written from
-`authentication.md`, RFC 7515, RFC 7518 and RFC 7519, with PyJWT as a second opinion on the tag.
+Tokens that are almost valid, against a model of the Engine profile.
+
+The model is written from `authentication.md`, RFC 7515, RFC 7518 and RFC 7519.
+
+PyJWT gives a second opinion on the tag.
 -/
 
 open Hedgehog Support EthLib EthLib.Engine
@@ -189,9 +192,13 @@ def jwtVerdict (secret : ByteArray) (clock : Nat) (token : String) : String :=
 
 /-- A token passes exactly when the Engine profile accepts it, and fails for the model's reason.
 
-The profile: a secret of 32 bytes, three parts in base64url without padding, the HS256 tag of the
-first two, a header that names HS256 and no critical extension, and an `iat` that is a JSON number
-within 60 seconds of the clock, both ends included. -/
+The profile:
+
+- A secret of 32 bytes.
+- Three parts in base64url without padding.
+- The HS256 tag of the first two.
+- A header that names HS256 and no critical extension.
+- An `iat` that is a JSON number within 60 seconds of the clock, both ends included. -/
 def jwtChecks (oracle : Oracle) : Property IO := propertyM do
   let t ← forAll genTokenCase
   pure do

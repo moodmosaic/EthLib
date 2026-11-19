@@ -4,8 +4,10 @@ import EthLib.Cryptography.Kzg
 /-!
 # KZG against c-kzg-4844
 
-The blob operations of EIP-4844 and the cell operations of EIP-7594, on the trusted setup that
-EthLib embeds, which the oracle reads from the same file.
+The blob operations of EIP-4844 and the cell operations of EIP-7594.
+
+They run on the trusted setup that EthLib embeds, which the oracle reads from the same file.
+
 A blob is described by a few numbers, so that a failing case shrinks to a readable one.
 -/
 
@@ -54,16 +56,24 @@ def genBlob (invalid : Bool := true) : Gen BlobSpec := do
 
 def blobHex (spec : BlobSpec) : String := hexVec spec.blob
 
-/-- A point where a polynomial is opened: a root of unity of the domain, an edge of the
-field, or any number below `2 ^ 256`. -/
+/-- A point where a polynomial is opened.
+
+It is a root of unity of the domain, an edge of the field, or any number below `2 ^ 256`. -/
 def genZ : Gen Nat :=
   Gen.frequency [
     (3, (fun j => modPow r 7 ((r - 1) / 4096 * j)) <$> Gen.nat (.constant 0 4095)),
     (1, (fun j => modPow r 7 ((r - 1) / 8192 * j)) <$> Gen.nat (.constant 0 8191)),
     (4, genNear r)]
 
-/-- 48 bytes near a commitment or a proof: itself, the point at infinity, a point of the
-curve that may lie outside the subgroup, its negative, or one bit changed. -/
+/-- 48 bytes near a commitment or a proof.
+
+They are one of:
+
+- The commitment or the proof itself.
+- The point at infinity.
+- A point of the curve that may lie outside the subgroup.
+- Its negative.
+- One bit changed. -/
 def genBad48 (good : Vector UInt8 48) : Gen (Vector UInt8 48) :=
   Gen.frequency [
     (5, pure good),
@@ -79,8 +89,11 @@ def verdict (result : Except KzgError Bool) : String :=
   | .ok false => "0"
   | .error _ => "error"
 
-/-- The commitment of a blob is c-kzg's, a blob with an element of `r` or more is refused,
-and the versioned hash of the commitment is that of EIP-4844. -/
+/-- The commitment of a blob is c-kzg's.
+
+A blob with an element of `r` or more is refused.
+
+The versioned hash of the commitment is that of EIP-4844. -/
 def commits (setup : TrustedSetup) (oracle : Oracle) : Property IO := propertyM do
   let spec ← forAll genBlob
   pure do
@@ -93,8 +106,9 @@ def commits (setup : TrustedSetup) (oracle : Oracle) : Property IO := propertyM 
         (← oracle.ask ["versionedhash", hexVec c])
     | .error _ => pure ()
 
-/-- A proof at a point and its value are c-kzg's, and verification agrees on the proof
-changed at one place. -/
+/-- A proof at a point and its value are c-kzg's.
+
+Verification agrees on the proof changed at one place. -/
 def proves (setup : TrustedSetup) (oracle : Oracle) : Property IO := propertyM do
   let spec ← forAll (genBlob false)
   let z ← forAll genZ
@@ -189,8 +203,13 @@ def genIndices : Gen (List Nat) := do
     (1, pure (chosen.dropLast ++ [128])),
     (1, pure (chosen.take 1 ++ chosen))]
 
-/-- Recovery from half of the cells gives the cells and proofs of c-kzg, and refuses what
-c-kzg refuses: too few cells, an index out of range or out of order, an invalid cell. -/
+/-- Recovery from half of the cells gives the cells and proofs of c-kzg.
+
+It refuses what c-kzg refuses:
+
+- Too few cells.
+- An index out of range or out of order.
+- An invalid cell. -/
 def recovers (setup : TrustedSetup) (oracle : Oracle) : Property IO := propertyM do
   let spec ← forAll (genBlob false)
   let indices ← forAll genIndices
@@ -213,14 +232,17 @@ def recovers (setup : TrustedSetup) (oracle : Oracle) : Property IO := propertyM
     let expected ← oracle.ask ["kzgrecover", listWord (indices.map toString),
       listWord (chosen.map hexVec)]
     -- Given all 128 cells, c-kzg copies them, where the specification interpolates them again.
-    -- The two differ on cells that are not the values of one polynomial, so only the proofs
-    -- are compared there.
+    --
+    -- The two differ on cells that are not the values of one polynomial.
+    --
+    -- So only the proofs are compared there.
     if spoil.isSome && indices.length == 128 && got != "error" && expected != "error" then
       (words got).drop 1 === (words expected).drop 1
     else got === expected
 
-/-- The batch verification of cell proofs is c-kzg's, on cells of up to two blobs with an
-index, a cell, a proof or a commitment changed. -/
+/-- The batch verification of cell proofs is c-kzg's.
+
+It runs on cells of up to two blobs, with an index, a cell, a proof or a commitment changed. -/
 def verifiesCells (setup : TrustedSetup) (oracle : Oracle) : Property IO := propertyM do
   let (specA, specB) ← forAll (Gen.zip (genBlob false) (genBlob false))
   let picks ← forAll (Gen.list (.linear 0 5) (Gen.zip Gen.bool (Gen.frequency [

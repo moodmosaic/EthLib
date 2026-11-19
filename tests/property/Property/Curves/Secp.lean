@@ -6,6 +6,7 @@ import EthLib.Cryptography.Secp256r1
 # secp256k1 and secp256r1 against libsecp256k1, OpenSSL and a model of SEC 1
 
 Signing is RFC 6979, verification and recovery are SEC 1 v2 sections 4.1.4 and 4.1.6.
+
 The inputs are valid signatures and keys, then changed at one place.
 -/
 

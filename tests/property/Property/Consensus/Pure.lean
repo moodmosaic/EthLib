@@ -8,8 +8,9 @@ import EthLib.Consensus.Time
 /-!
 # Helpers that need no state
 
-The shuffle, the committees, the fork schedule with its digest, and the arithmetic of time,
-against consensus-specs and against themselves where the source states a law.
+The shuffle, the committees, the fork schedule with its digest, and the arithmetic of time.
+
+Each runs against consensus-specs, and against itself where the source states a law.
 -/
 
 open Hedgehog Support EthLib EthLib.Base EthLib.Consensus EthLib.Serialization.Ssz
@@ -26,8 +27,9 @@ def genSeed : Gen Bytes32 := (fun bytes => Vector.ofFn fun i => bytes[i.val]!) <
 /-- A list of numbers in the text form of the oracle. -/
 def showNats (xs : List Nat) : String := "[" ++ ",".intercalate (xs.map toString) ++ "]"
 
-/-- The shuffled position of every index is that of consensus-specs, and the whole-list shuffle
-gives the same positions, which form a permutation. -/
+/-- The shuffled position of every index is that of consensus-specs.
+
+The whole-list shuffle gives the same positions, which form a permutation. -/
 def shuffle (oracle : Oracle) : Property IO := propertyM do
   let (presetName, preset) ← forAllWith (·.1) genPreset
   let count ← forAll (Gen.frequency [(6, Gen.nat (.linear 0 70)),
@@ -97,8 +99,9 @@ def scheduleConfig (epochs : List Nat) (blobs : List (Nat × Nat)) : Consensus.C
     GLOAS_FORK_EPOCH := at_ 6, HEZE_FORK_EPOCH := at_ 7,
     BLOB_SCHEDULE := blobs.map fun (epoch, limit) => ⟨UInt64.ofNat epoch, UInt64.ofNat limit⟩ }
 
-/-- The fork version, the blob parameters and the fork digest at an epoch are those of
-consensus-specs, under any fork schedule and blob schedule. -/
+/-- At an epoch, the fork version, the blob parameters and the fork digest match consensus-specs.
+
+This holds under any fork schedule and blob schedule. -/
 def schedule (oracle : Oracle) : Property IO := propertyM do
   let epochs ← forAll genForkEpochs
   let blobs ← forAll genBlobSchedule

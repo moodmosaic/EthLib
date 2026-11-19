@@ -6,8 +6,9 @@ import EthLib.Cryptography.Aes
 /-!
 # What the properties of symmetric cryptography share
 
-Lengths biased to the block and padding boundaries, bytes biased to the carries, and the
-conversions between byte arrays and the fixed-size vectors of EthLib.
+Lengths biased to the block and padding boundaries, and bytes biased to the carries.
+
+Also the conversions between byte arrays and the fixed-size vectors of EthLib.
 -/
 
 open Hedgehog Support
@@ -25,8 +26,9 @@ def hexv {n : Nat} (v : Vector UInt8 n) : String := hex (unvec v)
 
 /-- A length near a multiple of `block`: from 10 below it to 2 above, or any small one.
 
-Padding rules change at the block boundary and a few bytes before it (9 for SHA-256, 1 for
-Keccak), so most draws land there. -/
+Padding rules change at the block boundary and a few bytes before it (9 for SHA-256, 1 for Keccak).
+
+So most draws land there. -/
 def genLen (block : Nat) (blocks : Nat := 3) : Gen Nat :=
   Gen.frequency [
     (2, Gen.nat (.linear 0 (2 * block))),

@@ -6,8 +6,10 @@ import EthLib.Cryptography.Bls
 # The arithmetic kernels against arithmetic on `Nat`
 
 Montgomery limbs, the extended Euclidean inverse, and the Jacobian formulas.
-The Jacobian formulas run on curves over small primes, where equal and opposite points, and
-points of order two, turn up in every few cases.
+
+The Jacobian formulas run on curves over small primes.
+
+There equal and opposite points, and points of order two, turn up in every few cases.
 -/
 
 open Hedgehog Support EthLib EthLib.Cryptography
@@ -32,8 +34,9 @@ def montgomery : Property IO := pureIO do
   beNat (Montgomery.toBytesBE x) === a % p
   ensure ((x == y) == (a % p == b % p)) "equality of forms is not equality mod p"
 
-/-- Bytes read at an offset are the number of the 32 bytes from there, with zeros past the
-end, and nothing for a number of `p` or more. -/
+/-- Bytes read at an offset are the number of the 32 bytes from there, with zeros past the end.
+
+The read gives nothing for a number of `p` or more. -/
 def montgomeryBytes : Property IO := pureIO do
   let p := Secp256k1.Fp.modulus
   let a ← forAll (genNear p)

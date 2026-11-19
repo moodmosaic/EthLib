@@ -8,8 +8,9 @@ import Property.Evm.Glamsterdam
 /-!
 # The EVM, on generated inputs
 
-Each property generates inputs and requires an answer that EthLib did not compute: the one of the
-Python execution-specs (`oracle/evm.py`), or of a model written from the EIPs.
+Each property generates inputs and requires an answer that EthLib did not compute.
+
+It is that of the Python execution-specs (`oracle/evm.py`), or of a model written from the EIPs.
 
     lake exe evm-property            # 100 cases of each
     lake exe evm-property 1000
@@ -91,8 +92,9 @@ def sameFields (got want : String) : TestT IO Unit := do
 
 /-- A message leaves in EthLib what it leaves in the reference.
 
-The status, the gas left, the output, the refund, the logs, the accounts to delete, and each
-account with its nonce, its balance, its code and its storage. -/
+This covers the status, the gas left, the output, the refund, the logs and the accounts to delete.
+
+It also covers each account with its nonce, its balance, its code and its storage. -/
 def wholeProgram (oracle : Oracle) : Property IO := propertyM do
   let s ← forAll genScenario
   pure do
@@ -125,8 +127,9 @@ def sameGlamsterdam (got want : String) : TestT IO Unit := do
 
 /-- A call at Glamsterdam leaves what the branch `forks/amsterdam` of the reference leaves.
 
-The status, the gas left, the state gas left of EIP-8037, the output, the refund, the logs with
-the transfer logs of EIP-7708, the accounts to delete and the state. -/
+This covers the status, the gas left, the state gas left of EIP-8037, the output and the refund.
+
+It also covers the logs with the transfer logs of EIP-7708, the accounts to delete and the state. -/
 def glamsterdam (oracle : Oracle) : Property IO := propertyM do
   let s ← forAll (do
     let s ← genScenario
@@ -150,8 +153,9 @@ def glamsterdam (oracle : Oracle) : Property IO := propertyM do
 
 /-- FINDING: a frame that runs DELEGATECALL or STATICCALL records a read of its own account.
 
-The reference reads the balance of the running account only for CALL and CALLCODE, which send
-value.  The frame here is alone, so the account is in the reads for no other reason. -/
+The reference reads the balance of the running account only for CALL and CALLCODE, which send value.
+
+The frame here is alone, so the account is in the reads for no other reason. -/
 def delegatecallReads (oracle : Oracle) : Property IO := propertyM do
   let call ← forAll (Gen.element [(0xf4 : UInt8), 0xfa, 0xf1, 0xf2])
   pure do

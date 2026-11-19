@@ -62,7 +62,9 @@ structure Stream where
 /-- The stream against the queue of its items.
 
 A read gives the next item written and moves the reader by exactly its encoding.
+
 The buffer under a list prefix decodes to the list of every item written.
+
 A read of the last item from a buffer one byte short is refused. -/
 def streamMachine : StateMachine StreamModel StreamStep Stream IO where
   toModel := streamModel

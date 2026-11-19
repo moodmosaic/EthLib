@@ -5,8 +5,9 @@ import EthLib.Engine.Json
 /-!
 # What the properties of the Engine API share
 
-Generators of hashes and of hexadecimal text that is almost valid, and the text forms that the
-oracle reads.
+Generators of hashes and of hexadecimal text that is almost valid.
+
+Also the text forms that the oracle reads.
 -/
 
 open Hedgehog Support EthLib EthLib.Base
@@ -55,6 +56,7 @@ def genHexText (size : Nat) : Gen String := do
 /-- Text that is almost a quantity below `2 ^ bits`.
 
 A quantity has no leading zero, and zero is `0x0`, so zeros in front are the near misses.
+
 The values sit near the top of the width, where one digit more is out of range. -/
 def genQuantityText (bits : Nat) : Gen String := do
   let n ← Gen.choice [genNatBits bits, (2 ^ bits + ·) <$> Gen.nat (.exponential 0 (2 ^ bits)),

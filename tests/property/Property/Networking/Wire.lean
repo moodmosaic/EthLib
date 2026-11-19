@@ -9,8 +9,11 @@ import EthLib.Networking.Rlpx.Frame
 /-!
 # discv5 and RLPx, on generated inputs
 
-The reference (`oracle/networking_wire.py`) is written from `discv5-wire.md`, `discv5-theory.md`
-and `rlpx.md`, and it reproduces the test vectors of discv5 when it starts.
+The reference is `oracle/networking_wire.py`.
+
+It is written from `discv5-wire.md`, `discv5-theory.md` and `rlpx.md`.
+
+It reproduces the test vectors of discv5 when it starts.
 -/
 
 open Hedgehog Support EthLib EthLib.Networking NetworkingProperty

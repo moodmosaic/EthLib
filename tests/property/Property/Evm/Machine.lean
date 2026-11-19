@@ -5,11 +5,11 @@ import Property.Evm.Program
 
 Two state machine tests drive one frame of EthLib through straight-line code.
 
-- `storageMachine` is a `StateMachine`: its model is the gas and the refund of SLOAD and SSTORE,
-  written from the EIPs (EIP-150, EIP-1884, EIP-2200, EIP-2929, EIP-3529), with no reference
-  process.
-- `frameScenario` is a scenario of `Command`s, one type per family of instructions, run in
-  madhouse mode against a frame that the Python execution-specs step in the oracle.
+- `storageMachine` is a `StateMachine`.
+  Its model is the gas and the refund of SLOAD and SSTORE, with no reference process.
+  The model is written from the EIPs (EIP-150, EIP-1884, EIP-2200, EIP-2929, EIP-3529).
+- `frameScenario` is a scenario of `Command`s, one type per family of instructions.
+  It runs in madhouse mode against a frame that the Python execution-specs step in the oracle.
 -/
 
 open Hedgehog Support EthLib EthLib.Base EthLib.Execution EthLib.Execution.Evm
@@ -160,6 +160,7 @@ def storageModel : Model StorageModel StorageStep where
 /-- SLOAD and SSTORE charge and refund what the EIPs say, over any sequence on four slots.
 
 The model is the text of EIP-2200, EIP-2929 and EIP-3529, and of the Yellow Paper before them.
+
 After each step the gas left, the refund counter and the four words are the model's. -/
 def storageMachine : StateMachine StorageModel StorageStep (Σ fork, StorageSut fork) IO where
   toModel := storageModel
@@ -263,6 +264,7 @@ def DeepStep.code : DeepStep → ByteArray
 /-- DUPN, SWAPN and EXCHANGE of Glamsterdam move the stack as EIP-8024 says, over any sequence.
 
 The model is a list and the two decoders of the EIP.
+
 An immediate byte that encodes nothing, a stack too short and a full stack refuse the step. -/
 def deepStackMachine : StateMachine DeepStack DeepStep (Evm .glamsterdam Nat × Bool) IO where
   toModel := deepStackModel
@@ -294,9 +296,13 @@ structure FrameState where
   frame : Option (Σ fork, Evm fork Nat) := none
   /-- The depth of the stack as a generator can tell it before any command runs.
 
-  `Command.next` moves it and `Command.buildIn` reads it.  A command that the frame refuses
-  leaves the stack as it was, so this may be more than the true depth; `check` has the last
-  word. -/
+  `Command.next` moves it and `Command.buildIn` reads it.
+
+  A command that the frame refuses leaves the stack as it was.
+
+  So this depth may be more than the true depth.
+
+  `check` has the last word. -/
   depth : Nat := 0
   deriving Inhabited
 
@@ -407,8 +413,11 @@ instance : Command StackCommand FrameState FrameContext IO where
   label c := s!"{if c.byte ≥ 0x90 then "SWAP" else "DUP"}{c.byte.toNat % 16 + 1}"
   build ctx := StackCommand.mk ctx <$> Gen.integral (.constant 0x80 0x9f)
   next c s := if c.byte ≥ 0x90 then s else { s with depth := s.depth + 1 }
-  -- Mostly an instruction that the stack can serve: DUP1 to DUP of the depth, SWAP1 to SWAP of
-  -- one less.  The blind draw stays, for the reach of one past the stack.
+  -- Mostly an instruction that the stack can serve.
+  --
+  -- That is DUP1 to DUP of the depth, and SWAP1 to SWAP of one less.
+  --
+  -- The blind draw stays, for the reach of one past the stack.
   buildIn ctx s :=
     let blind := StackCommand.mk ctx <$> Gen.integral (.constant 0x80 0x9f)
     let dup := (fun n => StackCommand.mk ctx (0x80 + UInt8.ofNat n)) <$>
@@ -421,9 +430,13 @@ instance : Command StackCommand FrameState FrameContext IO where
 
 /-- A frame steps in EthLib as it steps in the reference, over any sequence of instructions.
 
-After each command the gas left, the program counter, the memory, the whole stack, the refund,
-the logs and the output are the reference's.  A sequence carries the memory, the warm slots and
-the storage from one instruction to the next, which one instruction alone does not show. -/
+After each command the gas left, the program counter and the memory are the reference's.
+
+So are the whole stack, the refund, the logs and the output.
+
+A sequence carries the memory, the warm slots and the storage from one instruction to the next.
+
+One instruction alone does not show that. -/
 def frameScenario (mode : Mode) (ctx : FrameContext) : Property IO :=
   scenario mode ctx [
     Command.gen (FrameCommand "ARITHMETIC"), Command.gen (FrameCommand "BITWISE"),

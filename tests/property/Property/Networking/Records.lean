@@ -8,7 +8,9 @@ import EthLib.Networking.Discv4.Packet
 # Node records and discv4 packets, on generated inputs
 
 The reference builds and reads records from the text of EIP-778, with `rlp` and libsecp256k1.
+
 It reads discv4 packets from `discv4.md`, EIP-8 and EIP-868.
+
 The inputs are valid records and packets with one rule of the source broken.
 -/
 

@@ -20,6 +20,7 @@ def orders : List Nat :=
     0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551]
 
 /-- The seeded generator is that of RFC 6979 §3.2, steps b to g.
+
 A hash of ones is above the order, so `bits2octets` must reduce it. -/
 def rfc6979Seed (oracle : Oracle) : Property IO := propertyM do
   let q ← forAll (Gen.element orders)
@@ -32,8 +33,11 @@ def rfc6979Seed (oracle : Oracle) : Property IO := propertyM do
 
 /-! ## ERC-2335 keystores -/
 
-/-- A character of a password: ASCII, the control codes that are stripped, characters that NFKD
-decomposes, and one outside the basic plane. -/
+/-- A character of a password.
+
+It is ASCII, a control code that is stripped, or a character that NFKD decomposes.
+
+It can also be a character outside the basic plane. -/
 def genPasswordChar : Gen Char :=
   Gen.frequency [
     (4, Gen.char (.constant ' ' '~')),
@@ -63,10 +67,19 @@ def genKdf : Gen (String × Nat × Nat × Nat) :=
       (Gen.zip (Gen.nat (.constant 1 2)) (Gen.nat (.constant 1 2)))]
 
 /-- Decryption of a keystore is that of ERC-2335.
+
 The reference writes the keystore of a secret, and changes one thing in it or not.
-EthLib opens it exactly when the reference does, with the same secret: the password is
-normalized and stripped of control codes, and a wrong password, a changed checksum or
-ciphertext, a missing required field and an unsupported function are refused. -/
+
+EthLib opens it exactly when the reference does, with the same secret.
+
+The password is normalized and stripped of control codes.
+
+These are refused:
+
+- A wrong password.
+- A changed checksum or ciphertext.
+- A missing required field.
+- An unsupported function. -/
 def keystore (oracle : Oracle) : Property IO := propertyM do
   let (kdf, cost, r, p) ← forAll genKdf
   let dklen ← forAll (Gen.element [32, 33, 48, 64])
@@ -113,6 +126,7 @@ def pbkdf2Vector : String :=
     "25def-3331-4eea-ab6f-782f3ed16a83\",\"version\":4}"
 
 /-- Both test vectors of ERC-2335 open to the secret of the ERC, under its password.
+
 Each derivation costs 262144 units, so this runs once and only when asked. -/
 def keystoreVectors : Property IO := pureIO do
   let password := "𝔱𝔢𝔰𝔱𝔭𝔞𝔰𝔰𝔴𝔬𝔯𝔡🔑"
@@ -143,8 +157,11 @@ def ethashSizes (oracle : Oracle) : Property IO := propertyM do
     s!"{Ethash.cacheSize block} {Ethash.datasetSize block}"
       === (← oracle.ask ["ethash_sizes", toString block])
 
-/-- Primality by trial division is primality, at the squares of primes too, and the size search
-is the loop of the specification: from `x`, down by two units while the quotient is composite. -/
+/-- Primality by trial division is primality, at the squares of primes too.
+
+The size search is the loop of the specification.
+
+The loop goes from `x`, down by two units while the quotient is composite. -/
 def ethashPrimes : Property IO := pureIO do
   let n ← forAll (Gen.frequency [(2, Gen.nat (.linear 0 2000)),
     (2, (fun p => p * p) <$> Gen.nat (.linear 0 300)), (1, Gen.nat (.exponential 0 (2 ^ 24)))])
@@ -166,8 +183,7 @@ def ethashSeed (oracle : Oracle) : Property IO := propertyM do
 def tinyCache (n : Nat) (seed : ByteArray) : Array Ethash.Item :=
   Nat.repeat Ethash.cacheRound Ethash.CACHE_ROUNDS (Ethash.initialCache n seed)
 
-/-- A cache of a few items, a dataset item and the proof of work from it are the
-specification's. -/
+/-- A cache of a few items, a dataset item and the proof of work from it are the specification's. -/
 def ethashPow (oracle : Oracle) : Property IO := propertyM do
   let n ← forAll (Gen.nat (.linear 1 40))
   let seed ← forAll (genBytesOf 32)
@@ -184,10 +200,11 @@ def ethashPow (oracle : Oracle) : Property IO := propertyM do
     s!"{hex pow.mixDigest} {hex pow.result}" === (← oracle.ask ["ethash_pow", toString n,
       hex seed, toString size, hex header, hex nonce])
 
-/-- The cache of epoch 0, all 262139 items of it, is the specification's, and so are a dataset
-item and the proof of work over the dataset size of that epoch.
-The cache takes a million Keccak-512 digests on each side, so this runs once and only when
-asked. -/
+/-- The cache of epoch 0, all 262139 items of it, is the specification's.
+
+So are a dataset item and the proof of work over the dataset size of that epoch.
+
+The cache takes a million Keccak-512 digests on each side, so this runs once and only when asked. -/
 def ethashEpoch (oracle : Oracle) : Property IO := propertyM do
   let index ← forAll (genNatBits 32)
   let (header, nonce) ← forAll (Gen.zip (genBytesOf 32) (genBytesOf 8))
@@ -206,8 +223,11 @@ def ethashEpoch (oracle : Oracle) : Property IO := propertyM do
 
 /-! ## The Merkle tree
 
-The node hash is a term that names its position and its children, so two different trees never
-share a root, and the model is a list of levels built from the leaves up. -/
+The node hash is a term that names its position and its children.
+
+So two different trees never share a root.
+
+The model is a list of levels built from the leaves up. -/
 
 open Merkle in
 /-- The symbolic node hash: the position and both children, written out. -/
@@ -263,15 +283,21 @@ def positions (h : Nat) : List Merkle.Position :=
 def antichain (ps : List Merkle.Position) : List Merkle.Position :=
   ps.filter fun p => !ps.any fun a => a != p && a.covers p
 
-/-- The helpers by their definition: the siblings of the path nodes that are not path nodes,
-from the leaves up, and from right to left within a level. -/
+/-- The helpers by their definition.
+
+They are the siblings of the path nodes that are not path nodes.
+
+They run from the leaves up, and from right to left within a level. -/
 def modelHelpers (h : Nat) (opened : List Merkle.Position) : List Merkle.Position :=
   let paths := (opened.flatMap (Merkle.pathTo h)).eraseDups
   let siblings := (paths.map (·.sibling)).eraseDups.filter (!paths.contains ·)
   siblings.mergeSort fun a b => a.level < b.level || (a.level == b.level && b.index ≤ a.index)
 
-/-- A multiproof of nodes on any levels rebuilds the root of the model, its helpers are those of
-their definition, and with one opened value changed it rebuilds another root or none. -/
+/-- A multiproof of nodes on any levels rebuilds the root of the model.
+
+Its helpers are those of their definition.
+
+With one opened value changed it rebuilds another root or none. -/
 def merkleMultiproof : Property IO := pureIO do
   let (h, leaves) ← forAll genTree
   let first ← forAllWith reprStr (Gen.element (positions h))

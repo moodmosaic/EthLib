@@ -10,18 +10,31 @@ import EthLib.Consensus.LightClient.FullNode
 /-!
 # The fork choice store as a state machine, against the pyspec
 
-The transitions are the handlers of `fork-choice.md`: a tick, a block, an attestation and an
-attester slashing.
-The oracle (`oracle/forkchoice_store.py`) builds each object with the pyspec, runs the handler of
-the pyspec on it, and answers with the steps it ran and a view of its store.
-The driver runs the same steps on EthLib's store and requires the same verdict of every step and
-the same view after every command: the head, the checkpoints, the boost, the clock, the
-equivocators, the latest messages and the weight of every block.
+The transitions are the handlers of `fork-choice.md`.
 
-The model of the `StateMachine` is the shape of the run: the clock and the slot of every block
-built so far.
-It is what a generator needs to aim a command at an edge, and what a precondition needs to keep a
-shrunk sequence meaningful.
+They are a tick, a block, an attestation and an attester slashing.
+
+The oracle is `oracle/forkchoice_store.py`.
+
+It builds each object with the pyspec and runs the handler of the pyspec on it.
+
+It answers with the steps it ran and a view of its store.
+
+The driver runs the same steps on EthLib's store.
+
+It requires the same verdict of every step and the same view after every command.
+
+The view holds the head, the checkpoints, the boost, the clock and the equivocators.
+
+It also holds the latest messages and the weight of every block.
+
+The model of the `StateMachine` is the shape of the run.
+
+That is the clock and the slot of every block built so far.
+
+The model is what a generator needs to aim a command at an edge.
+
+It is also what a precondition needs to keep a shrunk sequence meaningful.
 -/
 
 open Hedgehog Support EthLib EthLib.Base EthLib.Consensus EthLib.Serialization.Ssz
@@ -464,6 +477,7 @@ def applySut {fork : Fork} (sut : Sut fork) (after : Shape) (cmd : Cmd) :
       let (got, next) := runGossip store seen kind hexText subnet time
       annotate s!"{kind} at {time} ms on subnet {subnet}: EthLib says {got}, the pyspec {verdict}"
       -- An exception of the pyspec that is no verdict leaves the message undefined there:
+      --
       -- EthLib may then say anything but accept.
       let mine := (got.splitOn " ").head!
       ensure (mine == verdict || (verdict == "error" && mine != "accept"))

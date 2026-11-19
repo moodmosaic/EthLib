@@ -3,9 +3,11 @@ import Property.Evm.Program
 /-!
 # The functions under the instructions
 
-The arithmetic of the instructions against `Nat` and `Int`, written from Appendix H of the Yellow
-Paper and from EIP-145 and EIP-7939, and the jump destinations, the addresses of new contracts
-and the growth of memory against the reference.
+The arithmetic of the instructions against `Nat` and `Int`.
+
+It is written from Appendix H of the Yellow Paper and from EIP-145 and EIP-7939.
+
+The jump destinations, the addresses of new contracts and the growth of memory are the reference's.
 -/
 
 open Hedgehog Support EthLib EthLib.Base EthLib.Execution.Evm
@@ -31,9 +33,13 @@ def genArith : Gen Nat :=
 
 /-- Each arithmetic and bitwise instruction computes what the Yellow Paper defines on integers.
 
-DIV, SDIV, MOD and SMOD by zero give zero, SDIV of `-2^255` by `-1` gives `-2^255`, ADDMOD and
-MULMOD do not wrap at `2^256`, and a shift of 256 or more gives zero, or all ones for SAR of a
-negative word. -/
+DIV, SDIV, MOD and SMOD by zero give zero.
+
+SDIV of `-2^255` by `-1` gives `-2^255`.
+
+ADDMOD and MULMOD do not wrap at `2^256`.
+
+A shift of 256 or more gives zero, or all ones for SAR of a negative word. -/
 def arithmetic : Property IO := pureIO do
   let (x, y, z) ← forAll (Gen.zip genArith (Gen.zip genArith genArith))
   let small ← forAll (Gen.frequency [(4, Gen.nat (.constant 0 40)),
@@ -74,8 +80,11 @@ def powWord (x y : Nat) : Nat :=
     (if y / 2 ^ i % 2 = 1 then result * square % 2 ^ 256 else result,
       square * square % 2 ^ 256)).1
 
-/-- EXP is the power modulo `2^256`: the plain power for a small exponent, and for any exponent
-the product of the squares that its bits select. -/
+/-- EXP is the power modulo `2^256`.
+
+For a small exponent it is the plain power.
+
+For any exponent it is the product of the squares that its bits select. -/
 def exponent : Property IO := pureIO do
   let x ← forAll (Gen.frequency [(3, Gen.nat (.linear 0 5)), (2, genArith),
     (1, (2 * · + 1) <$> genNatBits 255)])

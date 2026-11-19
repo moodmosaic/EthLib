@@ -4,8 +4,10 @@ import EthLib.Consensus.Transition.Genesis
 /-!
 # Genesis from the deposits of the proof-of-work chain
 
-The oracle builds the deposits, each with its proof against the tree of the deposits so far, and
-the genesis state of consensus-specs.
+The oracle builds the deposits, each with its proof against the tree of the deposits so far.
+
+It also builds the genesis state of consensus-specs.
+
 EthLib must build the state of the same root, and agree on whether it launches the chain.
 -/
 

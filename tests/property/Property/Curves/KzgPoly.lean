@@ -5,8 +5,16 @@ import EthLib.Cryptography.Kzg
 # The polynomial helpers of KZG against arithmetic on `Nat`
 
 The helpers of the polynomial commitments specification, which the fast paths mostly bypass:
-products, division, interpolation, the vanishing polynomial, the roots of unity, the bit
-reversal, the FFT and the evaluation in evaluation form.
+
+- Products.
+- Division.
+- Interpolation.
+- The vanishing polynomial.
+- The roots of unity.
+- The bit reversal.
+- The FFT.
+- The evaluation in evaluation form.
+
 A polynomial of the model is a list of numbers mod `r`, lowest coefficient first.
 -/
 
@@ -60,8 +68,9 @@ def productBound : Property IO := pureIO do
   let b := Array.replicate n Fr.one
   (multiplyPolynomialcoeff a b).toOption.isSome === decide (m + n ≤ 8192)
 
-/-- Division inverts the product: `(q b + rest) / b = q`, for `rest` shorter than `b`; and an
-empty divisor, or one that ends in zero, is refused. -/
+/-- Division inverts the product: `(q b + rest) / b = q`, for `rest` shorter than `b`.
+
+An empty divisor, or one that ends in zero, is refused. -/
 def division : Property IO := pureIO do
   let (q, b) ← forAll (Gen.zip (genPoly (.linear 1 10)) (genPoly (.linear 0 8)))
   let lead ← forAll (Gen.frequency [(5, Gen.nat (.constant 1 (r - 1))), (1, pure 0)])
@@ -82,8 +91,9 @@ def division : Property IO := pureIO do
 def genPoints (range : Range Nat) : Gen (List Nat) :=
   List.eraseDups <$> Gen.list range (Gen.frequency [(1, Gen.nat (.linear 0 20)), (2, genCoeff)])
 
-/-- The interpolation through distinct points takes each value at its point, and the
-vanishing polynomial is monic and zero at each point. -/
+/-- The interpolation through distinct points takes each value at its point.
+
+The vanishing polynomial is monic and zero at each point. -/
 def interpolation : Property IO := pureIO do
   let xs ← forAll (genPoints (.linear 0 10))
   let ys ← forAll (Gen.list (.singleton xs.length) genCoeff)
@@ -144,8 +154,9 @@ def fft : Property IO := pureIO do
     (vals.zipIdx.foldl (fun acc (v, j) => (acc + v * modPow r w (i * j)) % r) 0)
   ofFr (fftField out roots (inv := true)) === vals
 
-/-- A polynomial in evaluation form has, at any point, the value of its coefficient form;
-at a point of the domain it is the entry there. -/
+/-- A polynomial in evaluation form has, at any point, the value of its coefficient form.
+
+At a point of the domain the value is the entry there. -/
 def evaluationForm : Property IO := pureIO do
   let p ← forAll (genPoly (.linear 0 6))
   let z ← forAll (Gen.frequency [
