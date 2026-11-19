@@ -1,0 +1,14 @@
+# The reference of the EVM driver: the Python execution-specs (EELS).
+# Install it without its dependencies: it pins coincurve below 21, which
+# does not build here, and runs with the versions of requirements.txt.
+#     .venv/bin/pip install --no-deps ethereum-execution==2.20.0
+ethereum-execution==2.20.0
+ethereum-types==0.4.1
+ethereum-rlp==0.1.7
+platformdirs==4.14.7
+typing-extensions==4.15.0
+# Glamsterdam: the branch forks/amsterdam of EELS, apart from the release.
+#     .venv/bin/pip install --no-deps --target .venv/evm-amsterdam \
+#         "git+https://github.com/ethereum/execution-specs@16898000911c1e3caa57be08509536c10ae92d3e" \
+#         spec256k1==0.2.3
+# Without it the driver skips the Glamsterdam property and says so.
