@@ -36,6 +36,10 @@ def main (args : List String) : IO UInt32 := do
       (depositTree oracle).withTests cases)]),
     ("scenario", scenarios.flatten),
     ("epoch", stepProperties oracle cases),
+    -- On any registry most steps are refused or do nothing at the later forks, which need
+    -- committees: the same steps on settled validators at a late slot, and on a large registry.
+    ("epoch-settled", stepProperties oracle cases genOperationState ", settled validators" ++
+      stepProperties oracle cases genLargeState ", a large registry"),
     ("operations", callProperties oracle cases genOperationState operations),
     ("requests", requestProperties oracle cases),
     ("blocks", callProperties oracle cases genOperationState blocks),

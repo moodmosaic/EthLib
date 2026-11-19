@@ -63,10 +63,13 @@ def steps : List Step := [
   ⟨"process_epoch", allForks, fun _ s => .ofState (processEpoch Config.minimal checks s)⟩,
   ⟨"process_slot", allForks, fun _ s => .ofState (processSlot s)⟩]
 
-/-- The properties of the steps: each agrees with consensus-specs at each of its forks. -/
-def stepProperties (oracle : Oracle) (cases : Nat) : List (String × Property IO) :=
+/-- The properties of the steps: each agrees with consensus-specs at each of its forks.
+
+`genWords` describes the states, and `suffix` tells the properties of one kind of state apart. -/
+def stepProperties (oracle : Oracle) (cases : Nat) (genWords : Gen (List String) := genState)
+    (suffix : String := "") : List (String × Property IO) :=
   steps.map fun step =>
-    (step.name, (agrees oracle step.forks step.name genState fun fork s _ _ =>
+    (step.name ++ suffix, (agrees oracle step.forks step.name genWords fun fork s _ _ =>
       step.run fork s).withTests cases)
 
 end ConsensusProperty
