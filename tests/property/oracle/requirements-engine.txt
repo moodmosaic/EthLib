@@ -1,0 +1,7 @@
+# The references of oracle/engine.py, beside those of requirements.txt.
+PyJWT==2.15.1
+pycryptodome==4.5.0
+rlp==5.0.0
+trie==4.0.0
+eth-account==0.14.0
+ethereum-execution==2.20.0
