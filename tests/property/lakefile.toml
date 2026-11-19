@@ -68,3 +68,23 @@ root = "Property.ForkChoice"
 [[lean_exe]]
 name = "engine-property"
 root = "Property.Engine"
+
+[[lean_exe]]
+name = "kernels-property"
+root = "Property.Kernels"
+
+[[lean_exe]]
+name = "transition-property"
+root = "Property.Transition"
+
+[[lean_exe]]
+name = "decoders-property"
+root = "Property.Decoders"
+
+[[lean_exe]]
+name = "protocols-property"
+root = "Property.Protocols"
+
+[[lean_exe]]
+name = "rpc-property"
+root = "Property.Rpc"
