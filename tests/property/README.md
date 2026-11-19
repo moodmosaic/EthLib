@@ -32,6 +32,11 @@ A driver takes the number of cases as its argument.
 Most also take the name of a group, or a part of the name of a property, to run only those.
 `ETHLIB_ORACLE_PYTHON` names another interpreter for the oracles.
 
+The base driver also takes its selection from the environment, as lean-hedgehog reads it.
+`HEDGEHOG_ONLY` holds parts of the names of the properties to run, separated by commas.
+`HEDGEHOG_RECHECK` holds the size and the two numbers of the seed that a failure report prints.
+The driver then runs that one case again.
+
 `oracle/requirements.txt` is enough for the base driver.
 Each other driver has `oracle/requirements-<layer>.txt`, which lists its references with their versions.
 Some say in a comment how to install a reference whose own dependencies do not resolve with the others.

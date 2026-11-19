@@ -340,4 +340,5 @@ def main (args : List String) : IO UInt32 := do
     ("state machine: the byte reader against its model", readerMachine.property.withTests cases),
     ("commands in order: a stream of values reads back", stream .deterministic),
     ("commands in madhouse: a stream of values reads back", (stream .madhouse).withTests cases)]
+    (← Selection.fromEnv)
   pure (if ok then 0 else 1)
