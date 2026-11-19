@@ -25,10 +25,18 @@ structure Env (fork : Fork) where
   /-- The SSZ bytes of the first state. -/
   initial : ByteArray
 
+/-- The builders of the first state, by key: each is active and may exit once. -/
+def firstBuilders : List Nat := List.range 4
+
 /-- The state of a scenario: EthLib's state after the commands so far, or none before the first. -/
 structure Chain (fork : Fork) where
   /-- The state, where a command has changed the first one. -/
   state : Option (State fork) := none
+  /-- The builders that no command has asked to exit yet.
+
+  Commands are generated before any runs, so this is what a generator knows of the state:
+  `Command.next` moves it, and `Command.buildIn` reads it. -/
+  staying : List Nat := firstBuilders
 
 instance {fork : Fork} : Inhabited (Chain fork) := ⟨{}⟩
 
@@ -60,8 +68,14 @@ def Invocation.apply {fork : Fork} (i : Invocation fork) (chain : Chain fork) :
       | .error _ => failWith "EthLib cannot write its own state"
   let answer ← i.env.oracle.ask (["on", i.env.forkName, i.name, hex bytes] ++ i.words)
   match ← compareAnswer i.env.oracle i.env.forkName fork answer i.words (call.run fork) with
-  | some post => pure ⟨some post⟩
+  | some post => pure { chain with state := some post }
   | none => pure chain
+
+/-- The SSZ bytes of the state of the scenario, or none if EthLib cannot write it. -/
+def Chain.bytes {fork : Fork} (env : Env fork) (chain : Chain fork) : Option ByteArray :=
+  match chain.state with
+  | none => some env.initial
+  | some state => (SszType.serialize state).toOption
 
 /-- The label of a call in a report. -/
 def Invocation.label {fork : Fork} (i : Invocation fork) : String :=
@@ -194,15 +208,36 @@ instance {fork : Fork} : Command (BuilderDepositCommand fork) (Chain fork) (Env 
   build env :=
     BuilderDepositCommand.mk <$> Invocation.build "process_builder_deposit_request" env
 
-/-- From Gloas: an exit request of a builder. -/
+/-- From Gloas: an exit request of a builder.
+
+Generated blind, a request names a builder that never was or that has left, and none takes effect.
+So most requests are generated for the state: a builder that stays, with its own address. -/
 structure BuilderExitCommand (fork : Fork) where
   call : Invocation fork
 
+/-- The builder that a request names with its own address, if it does. -/
+def BuilderExitCommand.leaving {fork : Fork} (c : BuilderExitCommand fork) : Option Nat :=
+  match c.call.words.map (·.splitOn ",") with
+  | [["9", key]] => key.toNat?
+  | _ => none
+
 instance {fork : Fork} : Command (BuilderExitCommand fork) (Chain fork) (Env fork) IO where
   check c _ := c.call.available
-  apply c := c.call.apply
+  apply c chain := do
+    let after ← c.call.apply chain
+    -- A scenario whose requests all do nothing does not test the exit of a builder.
+    cover 10 "a builder exit took effect" (after.bytes c.call.env != chain.bytes c.call.env)
+    pure after
   label c := c.call.label
   build env := BuilderExitCommand.mk <$> Invocation.build "process_builder_exit_request" env
+  next c chain := { chain with staying := chain.staying.filter (some · != c.leaving) }
+  buildIn env chain :=
+    let blind := BuilderExitCommand.mk <$> Invocation.build "process_builder_exit_request" env
+    if chain.staying.isEmpty then blind
+    else Gen.frequency [
+      (4, (fun key => ⟨⟨env, "process_builder_exit_request", [s!"9,{key}"]⟩⟩) <$>
+        Gen.element chain.staying),
+      (1, blind)]
 
 /-- Some slots pass, with the epoch transition at each boundary. -/
 structure SlotsCommand (fork : Fork) where
@@ -214,15 +249,20 @@ instance {fork : Fork} : Command (SlotsCommand fork) (Chain fork) (Env fork) IO 
   label c := c.call.label
   build env := SlotsCommand.mk <$> Invocation.build "process_slots" env
 
-/-- The words of the first state: settled validators, three of them large, at a late slot. -/
+/-- The words of the first state: settled validators, three of them large, at a late slot.
+
+A fork without builders ignores theirs. -/
 def initialWords : List String :=
   let validator (i : Nat) : String :=
     let effective := if i % 5 = 0 then 2048 else 32
     let credentials := if i % 5 = 0 then 2 else i % 3
     s!"v={credentials},{i % 4},{effective * increment},{effective * increment + i * 300000000},\
 0,0,0,{far},{far},7,7,0"
+  -- From Gloas: builders that deposited before the finalized epoch, so that each is active.
+  let builder (key : Nat) : String := s!"b={key},{key},{(key + 1) * increment},0,{far}"
   ["slot=805", "fin=c-2", "pj=c-2", "cj=c-1", "bits=15", "sync=0", "lookahead",
-    s!"drsi={far}", "churn=0,0,0,0,0"] ++ (List.range 20).map validator
+    s!"drsi={far}", "churn=0,0,0,0,0"] ++ (List.range 20).map validator ++
+    firstBuilders.map builder
 
 /-- The scenario of a fork: every operation the fork has, in any order, from the first state.
 
