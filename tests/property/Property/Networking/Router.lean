@@ -552,26 +552,29 @@ instance : Command Heartbeat World Unit IO where
   build _ := pure {}
 
 /-- The commands of a scenario. -/
-def commands : List (Unit → Gen (CommandWrapper World IO)) := [
+def commands : List (Unit → World → Gen (CommandWrapper World IO)) := [
   Command.gen Subscribe, Command.gen Subscribe, Command.gen Subscribe, Command.gen Join,
   Command.gen Graft, Command.gen Graft, Command.gen Prune, Command.gen Receive, Command.gen Receive,
   Command.gen Publish, Command.gen IHave, Command.gen IWant, Command.gen Heartbeat,
   Command.gen Heartbeat, Command.gen Leave, Command.gen Tick, Command.gen Tick]
 
 /-- A scripted start that fills meshes and caches, so that random commands meet a busy router. -/
-def warmUp : List (Unit → Gen (CommandWrapper World IO)) :=
+def warmUp : List (Unit → World → Gen (CommandWrapper World IO)) :=
   ((List.range 10).flatMap fun i =>
     [Command.fixed (Subscribe.mk i "a" true), Command.fixed (Subscribe.mk i "b" true)]) ++
   [Command.fixed (Join.mk "a"), Command.fixed (Publish.mk "b" 0)] ++
   ((List.range 6).map fun i => Command.fixed (Graft.mk i "a")) ++
   [Command.fixed (Receive.mk 0 "a" 1 0), Command.fixed Heartbeat.mk]
 
-/-- Long random sequences after the scripted start: `scenario` draws at most 15 commands. -/
+/-- Long random sequences after the scripted start.
+
+The script is drawn apart from the random commands, so a failure shrinks it too. -/
 def long (flood : Bool) : Property IO := propertyM do
-  let script ← forAll (Gen.sequence (warmUp.map (· ())))
-  let random ← forAll (Gen.list (.linear 1 120) (Gen.choice (commands.map (· ()))))
+  let start : World := { flood }
+  let script ← forAll (Gen.sequence (warmUp.map (· () start)))
+  let random ← forAll (Gen.list (.linear 1 120) (Gen.choice (commands.map (· () start))))
   pure do
-    let _ ← executeCommands (script ++ random) { flood }
+    let _ ← executeCommands (script ++ random) start
     pure ()
 
 /-- The scenarios of this module. -/

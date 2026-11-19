@@ -453,7 +453,7 @@ instance : Command GetPayloadCmd Node Oracle IO where
         pure (node.addBlock hash (some b.parent) true number b.time)
 
 /-- The methods of the node, with a weight each: a list that names a command more than once. -/
-def nodeCommands : List (Oracle → Gen (CommandWrapper Node IO)) :=
+def nodeCommands : List (Oracle → Node → Gen (CommandWrapper Node IO)) :=
   [Command.gen NewPayloadCmd, Command.gen NewPayloadCmd, Command.gen ForkchoiceCmd,
     Command.gen ForkchoiceCmd, Command.gen ForkchoiceCmd, Command.gen GetPayloadCmd,
     Command.gen GetPayloadCmd]
@@ -461,11 +461,8 @@ def nodeCommands : List (Oracle → Gen (CommandWrapper Node IO)) :=
 /-- The node answers every sequence of calls as the specification says: the madhouse scenario. -/
 def nodeScenario (oracle : Oracle) : Property IO := scenario .madhouse oracle nodeCommands
 
-/-- The same commands in sequences of up to 60 calls, which a chain needs to cross its forks.
-
-`scenario` draws at most 15 commands, so this property runs the commands itself. -/
-def nodeLongScenario (oracle : Oracle) : Property IO := propertyM do
-  let commands ← forAll (Gen.list (.linear 1 60) (Gen.choice (nodeCommands.map (· oracle))))
-  pure ((fun _ => ()) <$> executeCommands commands default)
+/-- The same commands in sequences of up to 60 calls, which a chain needs to cross its forks. -/
+def nodeLongScenario (oracle : Oracle) : Property IO :=
+  scenario .madhouse oracle nodeCommands (.linear 1 60)
 
 end EngineProperty
