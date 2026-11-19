@@ -292,6 +292,12 @@ def deepStackMachine : StateMachine DeepStack DeepStep (Evm .glamsterdam Nat × 
 /-- The state of a scenario: the frame of EthLib, once the first command started it. -/
 structure FrameState where
   frame : Option (Σ fork, Evm fork Nat) := none
+  /-- The depth of the stack as a generator can tell it before any command runs.
+
+  `Command.next` moves it and `Command.buildIn` reads it.  A command that the frame refuses
+  leaves the stack as it was, so this may be more than the true depth; `check` has the last
+  word. -/
+  depth : Nat := 0
   deriving Inhabited
 
 /-- The frame of a state at a fork, or none before the first command. -/
@@ -330,10 +336,10 @@ def stepBoth (ctx : FrameContext) (code : ByteArray) (s : FrameState) : TestT IO
   | .error e =>
     annotate s!"EthLib fails with {reprStr e}"
     (if e == .revert then "revert" else "halt") === (answer.splitOn " ").head!
-    pure ⟨some ⟨_, evm⟩⟩
+    pure { s with frame := some ⟨_, evm⟩ }
   | .ok after =>
     showFrame after === answer
-    pure ⟨some ⟨_, { after with running := true }⟩⟩
+    pure { s with frame := some ⟨_, { after with running := true }⟩ }
 
 /-- The code of an instruction after pushes of its operands. -/
 def opCode (byte : UInt8) (args : List Nat) : ByteArray :=
@@ -369,10 +375,20 @@ def families : List (String × List UInt8) := [
 def familyBytes (family : String) : List UInt8 :=
   ((families.find? fun (name, _) => name = family).map (·.2)).getD []
 
+/-- The instructions that leave one word more than their operands took: the others leave none.
+
+A command pushes the operands of its instruction itself, so this is what it adds to the stack. -/
+def leavesWord (byte : UInt8) : Bool :=
+  (familyBytes "ARITHMETIC" ++ familyBytes "BITWISE" ++ familyBytes "ENVIRONMENT" ++
+    [0x20, 0x35, 0x51, 0x59, 0x54, 0x5c]).contains byte
+
 instance {family : String} : Command (FrameCommand family) FrameState FrameContext IO where
   apply c s := stepBoth c.ctx c.code s
   label c := s!"{c.name} [{hex c.code}]"
   build ctx := buildFrameCommand family (familyBytes family) ctx
+  next c s :=
+    let byte := c.code.data.back?.getD 0
+    if leavesWord byte then { s with depth := s.depth + 1 } else s
 
 /-- DUP and SWAP, which need a stack: the command is skipped on one that is too short. -/
 structure StackCommand where
@@ -385,9 +401,23 @@ instance : Command StackCommand FrameState FrameContext IO where
     let n := c.byte.toNat % 16
     -- One command in the family reaches one past the stack, to see the underflow.
     if c.byte ≥ 0x90 then n + 1 ≤ depth else n ≤ depth
-  apply c s := stepBoth c.ctx ⟨#[c.byte]⟩ s
+  apply c s := do
+    cover 8 "a DUP or SWAP ran" true
+    stepBoth c.ctx ⟨#[c.byte]⟩ s
   label c := s!"{if c.byte ≥ 0x90 then "SWAP" else "DUP"}{c.byte.toNat % 16 + 1}"
   build ctx := StackCommand.mk ctx <$> Gen.integral (.constant 0x80 0x9f)
+  next c s := if c.byte ≥ 0x90 then s else { s with depth := s.depth + 1 }
+  -- Mostly an instruction that the stack can serve: DUP1 to DUP of the depth, SWAP1 to SWAP of
+  -- one less.  The blind draw stays, for the reach of one past the stack.
+  buildIn ctx s :=
+    let blind := StackCommand.mk ctx <$> Gen.integral (.constant 0x80 0x9f)
+    let dup := (fun n => StackCommand.mk ctx (0x80 + UInt8.ofNat n)) <$>
+      Gen.nat (.constant 0 (min s.depth 16 - 1))
+    let swap := (fun n => StackCommand.mk ctx (0x90 + UInt8.ofNat n)) <$>
+      Gen.nat (.constant 0 (min (s.depth - 1) 16 - 1))
+    if s.depth = 0 then blind
+    else if s.depth = 1 then Gen.frequency [(4, dup), (1, blind)]
+    else Gen.frequency [(3, dup), (3, swap), (1, blind)]
 
 /-- A frame steps in EthLib as it steps in the reference, over any sequence of instructions.
 
