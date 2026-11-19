@@ -11,7 +11,8 @@ A state machine ran 200 sequences (a fifth of the cases), and the madhouse scena
 
 ## References
 
-- SSZ: the Python of [`ethereum/ssz-specs`](https://github.com/ethereum/ssz-specs) at `4c2f088`, the source that `EthLib/Serialization/Ssz.lean` cites.
+- SSZ: the Python of [`ethereum/ssz-specs`](https://github.com/ethereum/ssz-specs) at the revision that `oracle/requirements-serialization.txt` names, the head of the repository on 2026-11-19.
+  `EthLib/Serialization/Ssz.lean` names the repository as its source without a revision, and `tests/sources.toml` pins its release v0.1.0, an earlier one.
 - SSZ, second: `eth-remerkleable` 0.1.31, which knows the progressive shapes and the compatible union.
 - SSZ nodes: a tree written in the oracle from the text of the specification, which must agree with both.
 - Merkle proofs: the functions of `consensus-specs` `ssz/merkle-proofs.md`, as written there, and those of `ssz-specs`.

@@ -22,13 +22,39 @@ This is a separate Lake package, as `tests/downstream` is, so EthLib gains no de
 ```bash
 lake build EthLib                      # At the repository root, once.
 cd tests/property
-python3 -m venv .venv && .venv/bin/pip install -r oracle/requirements.txt
+uv venv .venv
+uv pip install --python .venv/bin/python -r oracle/requirements.txt
 lake exe base-property                 # 100 cases of each property.
 lake exe base-property 20000
 ```
 
 A driver takes the number of cases as its argument.
+Most also take the name of a group, or a part of the name of a property, to run only those.
 `ETHLIB_ORACLE_PYTHON` names another interpreter for the oracles.
+
+`oracle/requirements.txt` is enough for the base driver.
+Each other driver has `oracle/requirements-<layer>.txt`, which lists its references with their versions.
+Some say in a comment how to install a reference whose own dependencies do not resolve with the others.
+
+A property that found something is kept failing in a group of findings, so that a run shows the counterexample.
+Such a group does not change the exit code of its driver.
+
+## Drivers
+
+| Driver | What it compares EthLib with |
+| --- | --- |
+| `base-property` | the Python standard library, and arithmetic on `Nat` and `Int` |
+| `serialization-property` | `ssz-specs`, remerkleable, the `rlp` package, `cryptography` for DER |
+| `hashes-property` | hashlib, `cryptography`, pycryptodome, crc32c |
+| `curves-property` | coincurve, eth-keys, OpenSSL, py_ecc, arkworks, milagro, c-kzg-4844 |
+| `networking-property` | cramjam, aioquic, noiseprotocol, and references written from the texts |
+| `evm-property` | the Python execution-specs, at every fork they have |
+| `execution-property` | the Python execution-specs, eth-account, py-trie, eth-bloom |
+| `consensus-property` | pyspec at the commit that `tests/sources.toml` pins |
+| `forkchoice-property` | the same pyspec, and a model of slashing protection from EIP-3076 |
+| `engine-property` | models written from execution-apis, and PyJWT |
+
+Each driver tests state in both ways that lean-hedgehog has: a state machine whose transitions are one type, and a scenario of commands that are each a type.
 
 ## Layout
 

@@ -184,7 +184,7 @@ Both are stated in the module docstring of `Gossip/Router.lean`.
 
 What worked well.
 
-- A generator of structured, almost valid inputs is short to write with `Gen.frequency`, `Gen.zip` and `Gen.element`, and the shrunk counterexamples were minimal on the first try: `01f00000` for the cramjam literal quirk, the empty element list for the six-byte preamble, two frames for the yamux reset, three for mplex.
+- A generator of structured, almost valid inputs is short to write with `Gen.frequency`, `Gen.zip` and `Gen.element`, and the shrunk counterexamples were minimal on the first try: `01 f0 00 00` for the cramjam literal quirk, the empty element list for the six-byte preamble, two frames for the yamux reset, three for mplex.
 - `Gen.subsequence` gave sorted, unique ENR keys with no filter.
 - `propertyM` with `forAll` first and the effect after it made the oracle process easy to use, and shrinking re-ran the oracle without trouble.
 - `StateMachine` with a transition generator that reads the model state reached deep states: window limits, reuse of IDs, both ends opening the same mplex ID.

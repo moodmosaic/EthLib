@@ -18,7 +18,7 @@ lake exe evm-property stats 3000        # How the generated programs end, to jud
   It has every fork from Frontier to BPO2, and was written apart from EthLib.
   A fork that changes only the consensus layer (Phase 0, Altair, Bellatrix) runs against the
   execution fork before it, and Petersburg against Constantinople, which is EELS's Petersburg.
-- `oracle/evm_amsterdam.py` drives the branch `forks/amsterdam` of EELS at commit `16898000`.
+- `oracle/evm_amsterdam.py` drives the branch `forks/amsterdam` of EELS, at the revision that `oracle/requirements-evm.txt` names.
   No release has Glamsterdam, and the fork is not final.
   EthLib's state tracker has the names of that branch, so the two are not fully independent.
 - `oracle/evm_inputs.py` builds call data for the precompiles from a recipe, with `py_ecc`,

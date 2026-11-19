@@ -99,7 +99,7 @@ None of these is a deviation of EthLib from its source.
 - The source decides for EthLib: `recover_cells_and_kzg_proofs` of `specs/fulu/polynomial-commitments-sampling.md` ends with "`polynomial_coeff = recover_polynomialcoeff(cell_indices, cosets_evals)`" and "`return compute_cells_and_kzg_proofs_polynomialcoeff(polynomial_coeff)`", with no case for 128 cells.
 - The two agree on every input whose cells are consistent, which is the only case a caller that verified the cells can meet.
 - The property now compares only the proofs in that one case, and says so in a comment.
-- The quoted lines were read from consensus-specs at commit `9d377fd5`, the one EIP-7594 pins; the specification itself was not run, so "EthLib follows the text" rests on reading `Recovery.lean` against it.
+- The quoted lines were read from the revision of consensus-specs that EIP-7594 links, which is not the one that `tests/sources.toml` pins; the specification itself was not run, so "EthLib follows the text" rests on reading `Recovery.lean` against it.
 
 ### 1b. HARNESS: the oracle that crafts a signature with `x_R >= n` looped
 
