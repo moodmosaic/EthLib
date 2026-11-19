@@ -1,26 +1,25 @@
-"""References for the EVM: the Python execution-specs (EELS), one command per line.
+"""References for the EVM: the Python execution-specs (EELS), one command per line."""
 
-    run <fork> <kind> <static> <gas> <value> <data> <code> <accounts>
-        Run a message with `process_message` (kind call) or
-        `process_create_message` (kind create), and print what it left.
-    frame <fork> <gas> <static>    Start a frame that the next commands step.
-    op <code>                      Run `code` in it, from its first byte.
-    pre <fork> <address> <gas> <data>   Call a precompile.
-    mk <kind> <a> <b> <c> <mutation> <cut>   Call data from a recipe.
-    basefee <fork> <limit> <used> <fee>          The base fee of the child.
-    excess <fork> <excess> <used> <base fee>     Its excess blob gas.
-    blobfee <fork> <excess>                      The blob gas price.
-    jumpdests <fork> <code>                      The valid jump destinations.
-    create <fork> <sender> <nonce>               The address of a creation.
-    create2 <fork> <sender> <salt> <code>        The address of CREATE2.
-    extend <fork> <size> <start:size>...         The price and size of a memory growth.
-    gaslimit <fork> <limit> <parent limit>       Whether the limit may follow.
-    taylor <factor> <numerator> <denominator>    `fake_exponential` of EIP-4844.
-
-Bytes are in hexadecimal, `-` for none.  An account is
-`address,nonce,balance,code,key=value&key=value`, and accounts are joined
-with `;`.
-"""
+#     run <fork> <kind> <static> <gas> <value> <data> <code> <accounts>
+#         Run a message with `process_message` (kind call) or
+#         `process_create_message` (kind create), and print what it left.
+#     frame <fork> <gas> <static>    Start a frame that the next commands step.
+#     op <code>                      Run `code` in it, from its first byte.
+#     pre <fork> <address> <gas> <data>   Call a precompile.
+#     mk <kind> <a> <b> <c> <mutation> <cut>   Call data from a recipe.
+#     basefee <fork> <limit> <used> <fee>          The base fee of the child.
+#     excess <fork> <excess> <used> <base fee>     Its excess blob gas.
+#     blobfee <fork> <excess>                      The blob gas price.
+#     jumpdests <fork> <code>                      The valid jump destinations.
+#     create <fork> <sender> <nonce>               The address of a creation.
+#     create2 <fork> <sender> <salt> <code>        The address of CREATE2.
+#     extend <fork> <size> <start:size>...         The price and size of a memory growth.
+#     gaslimit <fork> <limit> <parent limit>       Whether the limit may follow.
+#     taylor <factor> <numerator> <denominator>    `fake_exponential` of EIP-4844.
+#
+# Bytes are in hexadecimal, `-` for none.  An account is
+# `address,nonce,balance,code,key=value&key=value`, and accounts are joined
+# with `;`.
 
 import dataclasses
 import importlib

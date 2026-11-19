@@ -1,9 +1,8 @@
-"""References for the networking layer: one command per line, one answer per line.
+"""References for the networking layer: one command per line, one answer per line."""
 
-Words are separated by tabs; bytes are in hexadecimal, `-` for none.
-An answer that starts with `error` says the reference refused the input.
-Each command is documented at its handler.
-"""
+# Words are separated by tabs; bytes are in hexadecimal, `-` for none.
+# An answer that starts with `error` says the reference refused the input.
+# Each command is documented at its handler.
 
 import os
 import sys

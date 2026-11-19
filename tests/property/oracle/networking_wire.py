@@ -1,19 +1,18 @@
-"""discv5 and RLPx references, written from discv5-wire.md, discv5-theory.md and rlpx.md.
+"""discv5 and RLPx references, written from discv5-wire.md, discv5-theory.md and rlpx.md."""
 
-discv5_read <dest> <packet>             flag, nonce, authdata and message of a packet.
-discv5_write <dest> <iv> <flag> <nonce> <authdata> <message>   A masked packet.
-discv5_keys <eph sk> <dest pub> <challenge> <id a> <id b>      secret and session keys.
-discv5_idsign <sk> <challenge> <eph pub> <id b>                The ID signature.
-discv5_idverify <pub> <challenge> <eph pub> <id b> <sig>       Whether it verifies.
-discv5_gcm <key> <nonce> <pt> <ad>      The encrypted message with its tag.
-discv5_msg <plaintext>                  A message, as its type and its fields.
-discv5_distance <a> <b>                 The logarithmic distance.
-ecies_enc <pub> <r> <iv> <shared> <m>   An ECIES ciphertext of rlpx.md.
-ecies_dec <sk> <shared> <ciphertext>    Its message.
-rlpx_session <initiator> <eph> <inonce> <rnonce> <auth> <ack> <frames,...>
-                                        The secrets and the frames of one side.
-rlpx_auth <sk> <packet>                 What the recipient reads of an auth packet.
-"""
+# discv5_read <dest> <packet>             flag, nonce, authdata and message of a packet.
+# discv5_write <dest> <iv> <flag> <nonce> <authdata> <message>   A masked packet.
+# discv5_keys <eph sk> <dest pub> <challenge> <id a> <id b>      secret and session keys.
+# discv5_idsign <sk> <challenge> <eph pub> <id b>                The ID signature.
+# discv5_idverify <pub> <challenge> <eph pub> <id b> <sig>       Whether it verifies.
+# discv5_gcm <key> <nonce> <pt> <ad>      The encrypted message with its tag.
+# discv5_msg <plaintext>                  A message, as its type and its fields.
+# discv5_distance <a> <b>                 The logarithmic distance.
+# ecies_enc <pub> <r> <iv> <shared> <m>   An ECIES ciphertext of rlpx.md.
+# ecies_dec <sk> <shared> <ciphertext>    Its message.
+# rlpx_session <initiator> <eph> <inonce> <rnonce> <auth> <ack> <frames,...>
+#                                         The secrets and the frames of one side.
+# rlpx_auth <sk> <packet>                 What the recipient reads of an auth packet.
 
 import hashlib
 import hmac

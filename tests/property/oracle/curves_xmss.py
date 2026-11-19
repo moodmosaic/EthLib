@@ -1,10 +1,9 @@
-"""A model of leanXMSS, written from the formulas of the specification draft.
+"""A model of leanXMSS, written from the formulas of the specification draft."""
 
-    Th(P, A, M) = H_0(P | A | M), with H = Keccak-256 and H_0 its first half.
-
-The model verifies, signs with one one-time key, and computes small subtrees.
-Key generation and full signing build 2^16 one-time keys and are left out.
-"""
+#     Th(P, A, M) = H_0(P | A | M), with H = Keccak-256 and H_0 its first half.
+#
+# The model verifies, signs with one one-time key, and computes small subtrees.
+# Key generation and full signing build 2^16 one-time keys and are left out.
 
 import os
 import re

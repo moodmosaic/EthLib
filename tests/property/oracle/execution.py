@@ -1,13 +1,12 @@
-"""References for the execution chain: one command per line, one answer per line.
+"""References for the execution chain: one command per line, one answer per line."""
 
-The words of a command are separated by tabs, bytes are in hexadecimal and `-`
-is the empty byte string.  Most answers come from execution-specs (EELS), the
-others from py-trie, eth-bloom, eth-account and hashlib.
-
-    tx <fork> <chain> <bytes>        A transaction as bytes: its hash, sender,
-                                     intrinsic gas, floor and validity.
-    signed <chain> <key> <kind> ...  A transaction signed by eth-account.
-"""
+# The words of a command are separated by tabs, bytes are in hexadecimal and `-`
+# is the empty byte string.  Most answers come from execution-specs (EELS), the
+# others from py-trie, eth-bloom, eth-account and hashlib.
+#
+#     tx <fork> <chain> <bytes>        A transaction as bytes: its hash, sender,
+#                                      intrinsic gas, floor and validity.
+#     signed <chain> <key> <kind> ...  A transaction signed by eth-account.
 
 import importlib
 import os

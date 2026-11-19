@@ -1,8 +1,7 @@
-"""KZG references: c-kzg-4844, on the trusted setup that EthLib embeds.
+"""KZG references: c-kzg-4844, on the trusted setup that EthLib embeds."""
 
-A blob, a cell, a commitment and a proof are hexadecimal bytes.  A list is its
-items joined by `;`, or `[]`.  Long answers are their SHA-256.
-"""
+# A blob, a cell, a commitment and a proof are hexadecimal bytes.  A list is its
+# items joined by `;`, or `[]`.  Long answers are their SHA-256.
 
 import hashlib
 import os

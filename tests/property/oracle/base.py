@@ -1,10 +1,9 @@
-"""References for the base layer: one command per line, one answer per line.
+"""References for the base layer: one command per line, one answer per line."""
 
-    b64enc <hex>             URL-safe base64 without padding (RFC 4648, section 5).
-    b64dec <hex of text>     Its bytes, or error unless the text is canonical.
-    nfkd <code points>       NFKD by the host's Unicode tables, or skip.
-    isqrt <n>                The integer square root.
-"""
+# b64enc <hex>             URL-safe base64 without padding (RFC 4648, section 5).
+# b64dec <hex of text>     Its bytes, or error unless the text is canonical.
+# nfkd <code points>       NFKD by the host's Unicode tables, or skip.
+# isqrt <n>                The integer square root.
 
 import base64
 import math
@@ -29,9 +28,7 @@ def b64dec(text):
     if "=" in chars or len(chars) % 4 == 1:
         return "error"
     try:
-        data = base64.b64decode(
-            chars + "=" * (-len(chars) % 4), altchars=b"-_", validate=True
-        )
+        data = base64.b64decode(chars + "=" * (-len(chars) % 4), altchars=b"-_", validate=True)
     except ValueError:
         return "error"
     canonical = base64.urlsafe_b64encode(data).rstrip(b"=")

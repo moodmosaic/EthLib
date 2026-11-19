@@ -1,25 +1,24 @@
-"""References for the consensus layer: the executable consensus-specs (pyspec).
+"""References for the consensus layer: the executable consensus-specs (pyspec)."""
 
-One command per line, words separated by tabs, one answer line.
-
-    on <fork> <call> <state hex> <argument words>
-        The same as `st`, on a state given by its SSZ bytes.
-
-    st <fork> <call> <state words> [| <argument words>]
-        Build a state of the minimal preset from the words, apply the call,
-        and answer "<state hex> <argument hex> <result>".  The result is
-        "ok:<state root>", "val:<text>" or "error:<reason>".
-    diff <state hex>
-        The fields in which a state differs from the last post-state.
-    stats
-        "<call>:<accepted>/<unchanged>/<refused>/<skipped>" for each call.
-    pure <call> <arguments>
-        A helper that needs no state.
-
-A signature is valid when its first 32 bytes are the SHA-256 of the public
-keys followed by the message.  The driver gives EthLib the same check, so
-the test covers domains and signing roots without a pairing.
-"""
+# One command per line, words separated by tabs, one answer line.
+#
+#     on <fork> <call> <state hex> <argument words>
+#         The same as `st`, on a state given by its SSZ bytes.
+#
+#     st <fork> <call> <state words> [| <argument words>]
+#         Build a state of the minimal preset from the words, apply the call,
+#         and answer "<state hex> <argument hex> <result>".  The result is
+#         "ok:<state root>", "val:<text>" or "error:<reason>".
+#     diff <state hex>
+#         The fields in which a state differs from the last post-state.
+#     stats
+#         "<call>:<accepted>/<unchanged>/<refused>/<skipped>" for each call.
+#     pure <call> <arguments>
+#         A helper that needs no state.
+#
+# A signature is valid when its first 32 bytes are the SHA-256 of the public
+# keys followed by the message.  The driver gives EthLib the same check, so
+# the test covers domains and signing roots without a pairing.
 
 import importlib
 import os

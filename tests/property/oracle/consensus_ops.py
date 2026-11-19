@@ -1,10 +1,9 @@
-"""The calls of the consensus oracle: what to run on a state, and its argument.
+"""The calls of the consensus oracle: what to run on a state, and its argument."""
 
-`prepare` reads the words of an argument, builds the operation with
-consensus-specs types, and returns its SSZ bytes in hexadecimal with the
-function that applies the call.  It may set up the state first (a deposit
-needs a deposit root), so the caller writes the state after it.
-"""
+# `prepare` reads the words of an argument, builds the operation with
+# consensus-specs types, and returns its SSZ bytes in hexadecimal with the
+# function that applies the call.  It may set up the state first (a deposit
+# needs a deposit root), so the caller writes the state after it.
 
 import hashlib
 import inspect
@@ -502,8 +501,8 @@ def consolidation_request(spec, fork, state, f):
 def sync_participant_keys(spec, state, bits, keys):
     """The keys that the fork checks a sync aggregate against.
 
-    From Gloas the check takes the aggregate key of the committee when all took part, and that
-    key less the keys of those who did not when more than half did.
+    From Gloas the check takes the aggregate key of the committee when all took part.
+    When more than half did, it takes that key less the keys of those who did not.
     """
     if "aggregate_pubkey" not in inspect.getsource(spec.process_sync_aggregate):
         return keys

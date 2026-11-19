@@ -1,9 +1,8 @@
-"""References for the public-key layer: one command per line, one answer per line.
+"""References for the public-key layer: one command per line, one answer per line."""
 
-Words are separated by tabs.  Integers are decimal, bytes are hexadecimal
-(`-` for none), and a point is `x,y` or `inf`.  An answer of `error` says the
-reference refused the input.  The commands are listed in `COMMANDS` below.
-"""
+# Words are separated by tabs.  Integers are decimal, bytes are hexadecimal
+# (`-` for none), and a point is `x,y` or `inf`.  An answer of `error` says the
+# reference refused the input.  The commands are listed in `COMMANDS` below.
 
 import os
 import sys

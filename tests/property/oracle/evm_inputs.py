@@ -1,10 +1,9 @@
-"""Call data for the precompiles, built from a recipe by reference libraries.
+"""Call data for the precompiles, built from a recipe by reference libraries."""
 
-A recipe is a kind, three numbers, a mutation and a cut.  The numbers give a
-valid input (points from scalars, a signature from a key), the mutation
-breaks one rule of the precompile, and the cut changes the length.  The
-driver draws the recipe, so a failure shrinks to small numbers.
-"""
+# A recipe is a kind, three numbers, a mutation and a cut.  The numbers give a
+# valid input (points from scalars, a signature from a key), the mutation
+# breaks one rule of the precompile, and the cut changes the length.  The
+# driver draws the recipe, so a failure shrinks to small numbers.
 
 import hashlib
 

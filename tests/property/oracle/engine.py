@@ -1,18 +1,17 @@
-"""References for the Engine API layer: one command per line, one answer per line.
+"""References for the Engine API layer: one command per line, one answer per line."""
 
-    wire <kind> <hex of JSON text>      A base type by base-types.yaml and by common.md.
-    jwtmint <secret> <header> <claims>  The HS256 tag of two encoded parts, encoded.
-    jwtcheck <secret> <clock> <token>   Whether the Engine profile accepts a token.
-    jwtiat <secret> <token>             The iat claim of a token that PyJWT verifies.
-    method <hex of name>                Whether a name is a method with its version.
-    methods                             The methods the specification defines.
-    shape <name> <hex of JSON text>     The version of a structure that a value has, or 0.
-    reads <name> <hex of JSON text>     Whether a value is a structure of a response.
-    newpayload <hex of a case>          The answers allowed for a call, and its parameters.
-
-The rules are written from execution-apis at commit 3284ee8: src/engine/*.md and
-src/schemas/base-types.yaml.
-"""
+#     wire <kind> <hex of JSON text>      A base type by base-types.yaml and by common.md.
+#     jwtmint <secret> <header> <claims>  The HS256 tag of two encoded parts, encoded.
+#     jwtcheck <secret> <clock> <token>   Whether the Engine profile accepts a token.
+#     jwtiat <secret> <token>             The iat claim of a token that PyJWT verifies.
+#     method <hex of name>                Whether a name is a method with its version.
+#     methods                             The methods the specification defines.
+#     shape <name> <hex of JSON text>     The version of a structure that a value has, or 0.
+#     reads <name> <hex of JSON text>     Whether a value is a structure of a response.
+#     newpayload <hex of a case>          The answers allowed for a call, and its parameters.
+#
+# The rules are written from execution-apis at commit 3284ee8: src/engine/*.md and
+# src/schemas/base-types.yaml.
 
 import base64
 import hashlib

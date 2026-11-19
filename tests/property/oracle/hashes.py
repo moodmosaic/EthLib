@@ -1,11 +1,10 @@
-"""References for symmetric cryptography: one command per line, one answer per line.
+"""References for symmetric cryptography: one command per line, one answer per line."""
 
-Words are separated by tabs, bytes are in hexadecimal, `-` is the empty string.
-An answer that starts with `error` says the reference refused the input.
-Each reference is a library (hashlib, cryptography, pycryptodome, crc32c), or a
-transcription of the source text (RFC 7693, 7748, 7914, 6979, SP 800-38A, the
-Ethash specification, ERC-2335) that is checked against a library at start.
-"""
+# Words are separated by tabs, bytes are in hexadecimal, `-` is the empty string.
+# An answer that starts with `error` says the reference refused the input.
+# Each reference is a library (hashlib, cryptography, pycryptodome, crc32c), or a
+# transcription of the source text (RFC 7693, 7748, 7914, 6979, SP 800-38A, the
+# Ethash specification, ERC-2335) that is checked against a library at start.
 
 import hashlib
 import hmac

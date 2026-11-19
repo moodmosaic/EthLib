@@ -1,12 +1,11 @@
-"""Pure helpers of the pyspec: one command, one answer.
+"""Pure helpers of the pyspec: one command, one answer."""
 
-lc_better <fork> <new hex> <old hex>   is_better_update of two LightClientUpdates.
-custody <node id> <count>              get_custody_groups, or error.
-columns <group>                        compute_columns_for_custody_group, or error.
-att_subnet <per slot> <slot> <index>   compute_subnet_for_attestation.
-col_subnet <column>                    compute_subnet_for_data_column_sidecar.
-subscribed <node id> <epoch>           compute_subscribed_subnets.
-"""
+# lc_better <fork> <new hex> <old hex>   is_better_update of two LightClientUpdates.
+# custody <node id> <count>              get_custody_groups, or error.
+# columns <group>                        compute_columns_for_custody_group, or error.
+# att_subnet <per slot> <slot> <index>   compute_subnet_for_attestation.
+# col_subnet <column>                    compute_subnet_for_data_column_sidecar.
+# subscribed <node id> <epoch>           compute_subscribed_subnets.
 
 import importlib
 

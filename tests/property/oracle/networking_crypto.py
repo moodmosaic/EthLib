@@ -1,12 +1,11 @@
-"""References that need secp256k1, Keccak or AES: ENR, discv4, discv5, RLPx, libp2p.
+"""References that need secp256k1, Keccak or AES: ENR, discv4, discv5, RLPx, libp2p."""
 
-enr_make <sk> <seq> <k:v,...>   A signed "v4" record of EIP-778, RLP bytes.
-enr_read <hex>                  seq, node ID and whether the signature verifies.
-discv4_make <sk> <type> <data>  A discv4 packet around RLP data.
-discv4_read <hex>               sender, hash, type and the fields of its type.
-libp2p_verify <key> <msg> <sig> Whether libsecp256k1 takes the DER signature.
-libp2p_sign <sk> <msg>          The DER signature, RFC 6979, low s.
-"""
+# enr_make <sk> <seq> <k:v,...>   A signed "v4" record of EIP-778, RLP bytes.
+# enr_read <hex>                  seq, node ID and whether the signature verifies.
+# discv4_make <sk> <type> <data>  A discv4 packet around RLP data.
+# discv4_read <hex>               sender, hash, type and the fields of its type.
+# libp2p_verify <key> <msg> <sig> Whether libsecp256k1 takes the DER signature.
+# libp2p_sign <sk> <msg>          The DER signature, RFC 6979, low s.
 
 import coincurve
 from Crypto.Hash import keccak

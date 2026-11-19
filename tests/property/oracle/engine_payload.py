@@ -1,14 +1,13 @@
-"""A model of engine_newPayload before execution, and the hash of a payload's header.
+"""A model of engine_newPayload before execution, and the hash of a payload's header."""
 
-The model is written from execution-apis at commit 3284ee8: paris.md, shanghai.md,
-cancun.md, prague.md, osaka.md and amsterdam.md.  The header is that of EIP-3675 and
-EIP-4399, with the fields that EIP-4895, EIP-4844, EIP-4788, EIP-7685, EIP-7928 and
-EIP-7843 append.  Its hash is computed with `rlp` and Keccak-256, and again with the
-header classes of execution-specs for the forks that it has.
-
-A case names a payload and what is done to it; the answer is the outcomes that the
-specification allows, and the JSON text of the parameters.
-"""
+# The model is written from execution-apis at commit 3284ee8: paris.md, shanghai.md,
+# cancun.md, prague.md, osaka.md and amsterdam.md.  The header is that of EIP-3675 and
+# EIP-4399, with the fields that EIP-4895, EIP-4844, EIP-4788, EIP-7685, EIP-7928 and
+# EIP-7843 append.  Its hash is computed with `rlp` and Keccak-256, and again with the
+# header classes of execution-specs for the forks that it has.
+#
+# A case names a payload and what is done to it; the answer is the outcomes that the
+# specification allows, and the JSON text of the parameters.
 
 import hashlib
 import json

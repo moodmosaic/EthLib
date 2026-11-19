@@ -1,8 +1,7 @@
-"""BLS12-381 and alt_bn128 references: py_ecc, arkworks and milagro.
+"""BLS12-381 and alt_bn128 references: py_ecc, arkworks and milagro."""
 
-A point of G1 is `x,y` and a point of G2 is `x0,x1,y0,y1`, in decimal; `inf`
-is the point at infinity.  A list is its items joined by `;`, or `[]`.
-"""
+# A point of G1 is `x,y` and a point of G2 is `x0,x1,y0,y1`, in decimal; `inf`
+# is the point at infinity.  A list is its items joined by `;`, or `[]`.
 
 import hashlib
 import hmac

@@ -1,34 +1,33 @@
-"""References for the serialization layer: one command per line, one answer per line.
+"""References for the serialization layer: one command per line, one answer per line."""
 
-    rlpenc <item>            The RLP encoding of an item (pyrlp).
-    rlpdec <hex>             The item of a strict decoding, or error (pyrlp and a model).
-    rlpint <hex>             The scalar of a strict decoding, or error.
-    sszenc <type> <value>    The SSZ bytes and the root (ssz-specs and remerkleable).
-    sszdec <type> <hex>      The bytes written back and the root, or error.
-    ssznode <type> <value> <gindex>   The node at a generalized index, or error.
-    sszgindex <type> <path>  The generalized index of a path.
-    sszcompat <type> <type>  Whether the two can be options of one CompatibleUnion.
-    sszbounds <type>         The fewest and the most bytes of an encoding.
-    ssztype <type>           Whether the specification lets the declaration name a type.
-    sszjson <type> <value> <document>   Whether the document is the specification's.
-    sszjsonread <type> <document>       The bytes of the value a document holds.
-    spechelpers <indices>    get_helper_indices of the specification.
-    specroot <leaves> <proof> <indices> The root of a proof or of a multiproof.
-    sszdef <type>            The bytes and the root of the default value.
-    branchroot <leaf> <branch> <depth> <index>   The root a branch climbs to.
-    helpers <indices>        get_helper_indices of consensus-specs.
-    multiroot <leaves> <proof> <indices>   calculate_multi_merkle_root.
-    branch <leaf> <branch> <depth> <index> <root>   is_valid_merkle_branch.
-    dss <hex>                The two integers of a DER signature (cryptography), or error.
-    dertlv <hex>             One DER tag, length and value, by a model of X.690.
-    dervalid <hex>           Whether one value is DER for its type, by a model of X.690.
-    derint <hex>             The integer of a DER INTEGER, by the model.
-    jsonint <hex of text>    The integer that a JSON number is, or error.
-    rpc <kind> <hex of text> Whether the text matches the pattern of base-types.yaml.
-    e2s <hex>                The records of an e2store file, by a model.
-
-An item or a value or a type is JSON.  Bytes are hexadecimal, `-` for none.
-"""
+#     rlpenc <item>            The RLP encoding of an item (pyrlp).
+#     rlpdec <hex>             The item of a strict decoding, or error (pyrlp and a model).
+#     rlpint <hex>             The scalar of a strict decoding, or error.
+#     sszenc <type> <value>    The SSZ bytes and the root (ssz-specs and remerkleable).
+#     sszdec <type> <hex>      The bytes written back and the root, or error.
+#     ssznode <type> <value> <gindex>   The node at a generalized index, or error.
+#     sszgindex <type> <path>  The generalized index of a path.
+#     sszcompat <type> <type>  Whether the two can be options of one CompatibleUnion.
+#     sszbounds <type>         The fewest and the most bytes of an encoding.
+#     ssztype <type>           Whether the specification lets the declaration name a type.
+#     sszjson <type> <value> <document>   Whether the document is the specification's.
+#     sszjsonread <type> <document>       The bytes of the value a document holds.
+#     spechelpers <indices>    get_helper_indices of the specification.
+#     specroot <leaves> <proof> <indices> The root of a proof or of a multiproof.
+#     sszdef <type>            The bytes and the root of the default value.
+#     branchroot <leaf> <branch> <depth> <index>   The root a branch climbs to.
+#     helpers <indices>        get_helper_indices of consensus-specs.
+#     multiroot <leaves> <proof> <indices>   calculate_multi_merkle_root.
+#     branch <leaf> <branch> <depth> <index> <root>   is_valid_merkle_branch.
+#     dss <hex>                The two integers of a DER signature (cryptography), or error.
+#     dertlv <hex>             One DER tag, length and value, by a model of X.690.
+#     dervalid <hex>           Whether one value is DER for its type, by a model of X.690.
+#     derint <hex>             The integer of a DER INTEGER, by the model.
+#     jsonint <hex of text>    The integer that a JSON number is, or error.
+#     rpc <kind> <hex of text> Whether the text matches the pattern of base-types.yaml.
+#     e2s <hex>                The records of an e2store file, by a model.
+#
+# An item or a value or a type is JSON.  Bytes are hexadecimal, `-` for none.
 
 import hashlib
 import json
@@ -36,7 +35,6 @@ import re
 import struct
 import sys
 
-import rlp
 import ssz as spec
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from remerkleable.basic import boolean, uint8, uint16, uint32, uint64, uint128, uint256
@@ -49,6 +47,8 @@ from remerkleable.progressive import (
     ProgressiveContainer,
     ProgressiveList,
 )
+
+import rlp
 
 UINTS = {1: uint8, 2: uint16, 4: uint32, 8: uint64, 16: uint128, 32: uint256}
 
@@ -115,9 +115,7 @@ def rlpdec(data):
     except ValueError:
         mine = "error"
     try:
-        theirs = json.dumps(
-            rlp_json(rlp.decode(data, strict=True)), separators=(",", ":")
-        )
+        theirs = json.dumps(rlp_json(rlp.decode(data, strict=True)), separators=(",", ":"))
     except rlp.exceptions.DecodingError:
         theirs = "error"
     return mine if mine == theirs else f"references differ {mine} {theirs}"
@@ -168,14 +166,16 @@ def build_type(t):
         case ["plist", elem]:
             return ProgressiveList[ssz_type(elem)]
         case ["cont", names, fields]:
-            notes = {name: ssz_type(f) for name, f in zip(names, fields)}
+            notes = {name: ssz_type(f) for name, f in zip(names, fields, strict=False)}
             return type("C", (Container,), {"__annotations__": notes})
         case ["pcont", active, names, fields]:
-            notes = {name: ssz_type(f) for name, f in zip(names, fields)}
+            notes = {name: ssz_type(f) for name, f in zip(names, fields, strict=False)}
             base = ProgressiveContainer(active_fields=active)
             return type("P", (base,), {"__annotations__": notes})
         case ["union", selectors, options]:
-            return CompatibleUnion({s: ssz_type(o) for s, o in zip(selectors, options)})
+            return CompatibleUnion(
+                {s: ssz_type(o) for s, o in zip(selectors, options, strict=False)}
+            )
     raise ValueError(f"unknown type {t}")
 
 
@@ -193,7 +193,7 @@ def ssz_value(t, v):
         case ["vec", elem, _] | ["list", elem, _] | ["plist", elem]:
             return typ([ssz_value(elem, x) for x in v])
         case ["cont", names, fields] | ["pcont", _, names, fields]:
-            return typ(**{n: ssz_value(f, x) for n, f, x in zip(names, fields, v)})
+            return typ(**{n: ssz_value(f, x) for n, f, x in zip(names, fields, v, strict=False)})
         case ["union", selectors, options]:
             option = options[selectors.index(v["s"])]
             return typ(selector=v["s"], data=ssz_value(option, v["d"]))
@@ -286,16 +286,12 @@ def spec_build(t, sub=None):
             return declare(spec.ProgressiveList, ELEMENT_TYPE=sub(elem))
         case ["cont", names, fields]:
             if len(names) != len(fields) or len(set(names)) != len(names):
-                raise spec.SSZTypeError(
-                    spec.TypeFault.NOT_AN_INTEGER, type="", field="", got=""
-                )
+                raise spec.SSZTypeError(spec.TypeFault.NOT_AN_INTEGER, type="", field="", got="")
             notes = {name: sub(f) for name, f in zip(names, fields, strict=True)}
             return declare(spec.Container, __annotations__=notes)
         case ["pcont", active, names, fields]:
             if len(names) != len(fields) or len(set(names)) != len(names):
-                raise spec.SSZTypeError(
-                    spec.TypeFault.NOT_AN_INTEGER, type="", field="", got=""
-                )
+                raise spec.SSZTypeError(spec.TypeFault.NOT_AN_INTEGER, type="", field="", got="")
             notes = {name: sub(f) for name, f in zip(names, fields, strict=True)}
             return declare(
                 spec.ProgressiveContainer,
@@ -304,9 +300,7 @@ def spec_build(t, sub=None):
             )
         case ["union", selectors, options]:
             if len(selectors) != len(options) or len(set(selectors)) != len(selectors):
-                raise spec.SSZTypeError(
-                    spec.TypeFault.NOT_AN_INTEGER, type="", field="", got=""
-                )
+                raise spec.SSZTypeError(spec.TypeFault.NOT_AN_INTEGER, type="", field="", got="")
             chosen = {s: sub(o) for s, o in zip(selectors, options, strict=True)}
             return declare(spec.CompatibleUnion, OPTIONS=chosen)
     raise ValueError(f"unknown type {t}")
@@ -441,12 +435,10 @@ def tree_layout(t, v):
         case ["plist", elem]:
             return elements(elem, v), None, word(len(v))
         case ["cont", _, fields]:
-            return [("value", f, x) for f, x in zip(fields, v)], len(fields), None
+            return [("value", f, x) for f, x in zip(fields, v, strict=False)], len(fields), None
         case ["pcont", active, _, fields]:
-            values = iter(zip(fields, v))
-            leaves = [
-                ("value", *next(values)) if bit else ("chunk", ZERO) for bit in active
-            ]
+            values = iter(zip(fields, v, strict=False))
+            leaves = [("value", *next(values)) if bit else ("chunk", ZERO) for bit in active]
             return leaves, None, pack_bits(active)[0][1]
         case ["union", selectors, options]:
             option = options[selectors.index(v["s"])]
@@ -734,8 +726,8 @@ def calculate_multi_merkle_root(leaves, proof, indices):
     helper_indices = get_helper_indices(indices)
     assert len(proof) == len(helper_indices)
     objects = {
-        **{index: node for index, node in zip(indices, leaves)},
-        **{index: node for index, node in zip(helper_indices, proof)},
+        **dict(zip(indices, leaves, strict=False)),
+        **dict(zip(helper_indices, proof, strict=False)),
     }
     keys = sorted(objects.keys(), reverse=True)
     pos = 0
@@ -799,9 +791,7 @@ def dertlv(data):
     return f"{tag} {tohex(content)} {tohex(rest)}"
 
 
-PRINTABLE = set(
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 '()+,-./:=?"
-)
+PRINTABLE = set(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 '()+,-./:=?")
 
 
 def scalar(n):
@@ -866,9 +856,7 @@ def der_valid(tag, content):
             if len(content) % width:
                 return False
             units = range(0, len(content), width)
-            return all(
-                scalar(int.from_bytes(content[i : i + width], "big")) for i in units
-            )
+            return all(scalar(int.from_bytes(content[i : i + width], "big")) for i in units)
         case 48 | 49:
             try:
                 children = der_children(content)

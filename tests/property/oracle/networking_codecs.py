@@ -1,21 +1,20 @@
-"""Codec references: varints, QUIC, fork identifiers, gossip.
+"""Codec references: varints, QUIC, fork identifiers, gossip."""
 
-pb_varint <hex>               A whole input as one varint, by the consensus rules.
-uvarint <hex>                 A multiformats unsigned varint at the start: value, rest.
-quic_varint_dec <hex>         aioquic's read of a QUIC integer: value, rest.
-quic_varint_enc <n>           aioquic's shortest encoding.
-quic_pn <bits> <trunc> <exp>  RFC 9000 Appendix A.3, and aioquic's, which must agree.
-quic_initial <dcid>           The Initial secrets of client and server, by aioquic.
-quic_keys <suite> <secret>    The key, IV and header key of a secret, by aioquic.
-quic_protect <suite> <secret> <pn> <header> <payload>   aioquic's protected packet.
-forkid <genesis> <blocks> <times> <genesisTime> <head> <time>   EIP-2124 hash and next.
-forkid_validate ... <remoteHash> <remoteNext>   EIP-2124 validation, as geth filters.
-forkid_mainnet <head> <time>  Mainnet's identifier, checked against the EIPs' vectors.
-topic <hex>                   The fork digest and name of a gossip topic.
-subnet_name <base> <hex>      The subnet of a topic name.
-message_id <altair 0/1> <topic> <data>   The gossip message ID of the consensus layer.
-subnets <node> <epoch> <per> <count> <extra> <n>   compute_subscribed_subnets.
-"""
+# pb_varint <hex>               A whole input as one varint, by the consensus rules.
+# uvarint <hex>                 A multiformats unsigned varint at the start: value, rest.
+# quic_varint_dec <hex>         aioquic's read of a QUIC integer: value, rest.
+# quic_varint_enc <n>           aioquic's shortest encoding.
+# quic_pn <bits> <trunc> <exp>  RFC 9000 Appendix A.3, and aioquic's, which must agree.
+# quic_initial <dcid>           The Initial secrets of client and server, by aioquic.
+# quic_keys <suite> <secret>    The key, IV and header key of a secret, by aioquic.
+# quic_protect <suite> <secret> <pn> <header> <payload>   aioquic's protected packet.
+# forkid <genesis> <blocks> <times> <genesisTime> <head> <time>   EIP-2124 hash and next.
+# forkid_validate ... <remoteHash> <remoteNext>   EIP-2124 validation, as geth filters.
+# forkid_mainnet <head> <time>  Mainnet's identifier, checked against the EIPs' vectors.
+# topic <hex>                   The fork digest and name of a gossip topic.
+# subnet_name <base> <hex>      The subnet of a topic name.
+# message_id <altair 0/1> <topic> <data>   The gossip message ID of the consensus layer.
+# subnets <node> <epoch> <per> <count> <extra> <n>   compute_subscribed_subnets.
 
 import hashlib
 import re

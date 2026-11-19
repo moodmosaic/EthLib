@@ -1,10 +1,9 @@
-"""A model of leanSPHINCS verification, written from FIPS 205 and the scheme's formulas.
+"""A model of leanSPHINCS verification, written from FIPS 205 and the scheme's formulas."""
 
-    Th(PK.seed, ADRS, M) = Trunc_16(Keccak-256(PK.seed | ADRS | M))
-
-An address is eight big-endian 32-bit words: layer, tree (three words), type, key pair,
-and two words that the type gives a meaning to.
-"""
+#     Th(PK.seed, ADRS, M) = Trunc_16(Keccak-256(PK.seed | ADRS | M))
+#
+# An address is eight big-endian 32-bit words: layer, tree (three words), type, key pair,
+# and two words that the type gives a meaning to.
 
 from Crypto.Hash import keccak
 

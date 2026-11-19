@@ -1,29 +1,28 @@
-"""The fork choice of the pyspec, driven by abstract commands.
+"""The fork choice of the pyspec, driven by abstract commands."""
 
-The oracle builds every object (blocks, attestations, slashings) with the
-pyspec, runs the handler of the pyspec on it, and answers with the steps it
-ran and a view of its store.  A step is `<kind>:<argument>:<status>`:
-
-    t:<ms>:<status>       on_tick at an absolute time
-    b:<hex>:<status>      on_block of a SignedBeaconBlock
-    a:<hex>:<status>      on_attestation from the wire
-    A:<hex>:<status>      on_attestation from a block
-    s:<hex>:<status>      on_attester_slashing
-    e:<hex>:<status>      on_execution_payload_envelope, from Gloas
-    p:<hex>:<status>      on_payload_attestation_message, from Gloas
-    gb:<hex>:-:<ms>:<verdict>          validate_beacon_block_gossip
-    ga:<hex>:<subnet>:<ms>:<verdict>   validate_beacon_attestation_gossip
-    gg:<hex>:-:<ms>:<verdict>          validate_beacon_aggregate_and_proof_gossip
-    gs:<hex>:-:<ms>:<verdict>          validate_attester_slashing_gossip
-    ge:<hex>:-:<ms>:<verdict>          validate_execution_payload_envelope_gossip
-    gp:<hex>:-:<ms>:<verdict>          validate_payload_attestation_message_gossip
-
-A verdict is accept, ignore, reject, or error when the pyspec raises
-something else.  The gossip checks share one `Seen` for the whole run.
-
-The driver runs the same steps on EthLib and compares each status and the
-view.  BLS is off on both sides.
-"""
+# The oracle builds every object (blocks, attestations, slashings) with the
+# pyspec, runs the handler of the pyspec on it, and answers with the steps it
+# ran and a view of its store.  A step is `<kind>:<argument>:<status>`:
+#
+#     t:<ms>:<status>       on_tick at an absolute time
+#     b:<hex>:<status>      on_block of a SignedBeaconBlock
+#     a:<hex>:<status>      on_attestation from the wire
+#     A:<hex>:<status>      on_attestation from a block
+#     s:<hex>:<status>      on_attester_slashing
+#     e:<hex>:<status>      on_execution_payload_envelope, from Gloas
+#     p:<hex>:<status>      on_payload_attestation_message, from Gloas
+#     gb:<hex>:-:<ms>:<verdict>          validate_beacon_block_gossip
+#     ga:<hex>:<subnet>:<ms>:<verdict>   validate_beacon_attestation_gossip
+#     gg:<hex>:-:<ms>:<verdict>          validate_beacon_aggregate_and_proof_gossip
+#     gs:<hex>:-:<ms>:<verdict>          validate_attester_slashing_gossip
+#     ge:<hex>:-:<ms>:<verdict>          validate_execution_payload_envelope_gossip
+#     gp:<hex>:-:<ms>:<verdict>          validate_payload_attestation_message_gossip
+#
+# A verdict is accept, ignore, reject, or error when the pyspec raises
+# something else.  The gossip checks share one `Seen` for the whole run.
+#
+# The driver runs the same steps on EthLib and compares each status and the
+# view.  BLS is off on both sides.
 
 import atexit
 import collections
@@ -254,8 +253,8 @@ class ForkChoice:
     def shape_ok(self, attestation):
         """Whether a vote has the committee shape that `process_attestation` asks.
 
-        EthLib's `onAttestation` asks it of every vote, and `on_attestation`
-        of the pyspec of none.  A strict run leaves such votes out.
+        EthLib's `onAttestation` asks it of every vote, and `on_attestation` of the pyspec of none.
+        A strict run leaves such votes out.
         """
         spec, store = self.spec, self.store
         data = attestation.data
@@ -292,8 +291,8 @@ class ForkChoice:
     def build_block(self, parent_index, slot, variant, lookback):
         """A block on a parent at a slot, with the votes of the slots before it.
 
-        The entry is appended even when the block cannot be built, so that
-        the index of a block does not depend on what the pyspec accepts.
+        The entry is appended even when the block cannot be built.
+        So the index of a block does not depend on what the pyspec accepts.
         """
         spec = self.spec
         parent = self.blocks[parent_index]
@@ -473,8 +472,8 @@ class ForkChoice:
     def cmd_chain(self, parent, parent_slot, count, gap, late_ms):
         """Blocks one after another, each in its slot, with the votes before it.
 
-        It always ticks and appends `count` times, so that the clock and the
-        indices do not depend on what the pyspec accepts.
+        It always ticks and appends `count` times.
+        So the clock and the indices do not depend on what the pyspec accepts.
         """
         spec = self.spec
         steps = []

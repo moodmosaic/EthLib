@@ -1,12 +1,11 @@
-"""References for the consensus protocols around the state transition.
+"""References for the consensus protocols around the state transition."""
 
-One command per line, words separated by tabs, one answer line.
-
-    fc_*     The fork choice of the pyspec (see forkchoice_store.py).
-    lc_init, lc_update, lc_force
-             The light client store of the pyspec (see forkchoice_lightclient.py).
-    others   Pure helpers of the pyspec (see forkchoice_helpers.py).
-"""
+# One command per line, words separated by tabs, one answer line.
+#
+#     fc_*     The fork choice of the pyspec (see forkchoice_store.py).
+#     lc_init, lc_update, lc_force
+#              The light client store of the pyspec (see forkchoice_lightclient.py).
+#     others   Pure helpers of the pyspec (see forkchoice_helpers.py).
 
 import os
 import sys

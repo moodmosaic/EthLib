@@ -1,14 +1,13 @@
-"""Snappy references.
+"""Snappy references."""
 
-snappy_raw_dec <hex>     cramjam (Rust snap) on a raw block.
-snappy_model_dec <hex>   A decoder written from format_description.txt.
-snappy_raw_enc <hex>     cramjam's raw block, to decode elsewhere.
-snappy_frame_dec <hex>   cramjam on a framed stream.
-snappy_frame_model <hex> A decoder written from framing_format.txt.
-snappy_frame_enc <hex>   cramjam's framed stream.
-reqresp_payload <min> <max> <hex>   The payload of a request or a response chunk.
-masked_crc <hex>         The masked CRC-32C of framing_format.txt, section 3.
-"""
+# snappy_raw_dec <hex>     cramjam (Rust snap) on a raw block.
+# snappy_model_dec <hex>   A decoder written from format_description.txt.
+# snappy_raw_enc <hex>     cramjam's raw block, to decode elsewhere.
+# snappy_frame_dec <hex>   cramjam on a framed stream.
+# snappy_frame_model <hex> A decoder written from framing_format.txt.
+# snappy_frame_enc <hex>   cramjam's framed stream.
+# reqresp_payload <min> <max> <hex>   The payload of a request or a response chunk.
+# masked_crc <hex>         The masked CRC-32C of framing_format.txt, section 3.
 
 import cramjam
 from networking_util import tohex, unhex
@@ -23,8 +22,8 @@ class MalformedError(Exception):
 def model_decompress(data):
     """Decompress a block as format_description.txt describes it.
 
-    The preamble is read as the C++ reference reads it: at most five bytes,
-    and a value of at most 2^32 - 1.
+    The preamble is read as the C++ reference reads it.
+    That is at most five bytes, and a value of at most 2^32 - 1.
     """
     pos = 0
     declared = 0

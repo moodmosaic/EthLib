@@ -1,20 +1,18 @@
-"""The reference of the EVM at Glamsterdam: the branch `forks/amsterdam` of EELS.
+"""The reference of the EVM at Glamsterdam: the branch `forks/amsterdam` of EELS."""
 
-No release has this fork, so the branch is installed apart from the released
-package, at the commit that `requirements-evm.txt` names:
-
-    .venv/bin/pip install --no-deps --target .venv/evm-amsterdam \
-        git+https://github.com/ethereum/execution-specs@<commit>
-
-`ETHLIB_AMSTERDAM_SPECS` names another directory.  One command per line:
-
-    run <static> <gas> <reservoir> <value> <data> <code> <accounts>
-    reads <the same>     Only the accounts that the frame read.
-
-It runs `process_call` on a frame from the caller to the target, and prints
-what the frame left, in the form of `oracle/evm.py` with the state gas left
-after the gas left.
-"""
+# No release has this fork, so the branch is installed apart from the released
+# package, at the commit that `requirements-evm.txt` names:
+#
+#     .venv/bin/pip install --no-deps --target .venv/evm-amsterdam         git+https://github.com/ethereum/execution-specs@<commit>
+#
+# `ETHLIB_AMSTERDAM_SPECS` names another directory.  One command per line:
+#
+#     run <static> <gas> <reservoir> <value> <data> <code> <accounts>
+#     reads <the same>     Only the accounts that the frame read.
+#
+# It runs `process_call` on a frame from the caller to the target, and prints
+# what the frame left, in the form of `oracle/evm.py` with the state gas left
+# after the gas left.
 
 import os
 import sys
