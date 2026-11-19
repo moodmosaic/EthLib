@@ -1,0 +1,16 @@
+blake3==1.0.10
+cytoolz==1.2.0
+eth-consensus-specs @ git+https://github.com/ethereum/consensus-specs@aa16bb4c156184e9548a997d53efaf2a228a6304
+eth-hash==0.8.0
+eth-ssz-specs @ git+https://github.com/ethereum/ssz-specs@4c2f08805080c6b4b12ede7bf48ad6a80229f4b1
+eth-typing==6.0.0
+eth-utils==6.0.0
+frozendict==2.4.7
+lru-dict==1.4.1
+marko==2.2.4
+py_arkworks_bls12381==0.5.0
+pydantic==2.14.3
+pydantic_core==2.50.4
+ruamel.yaml==0.19.1
+setuptools==84.0.0
+toolz==1.2.0
