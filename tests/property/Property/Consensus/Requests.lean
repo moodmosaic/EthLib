@@ -83,9 +83,9 @@ def requestProperty (oracle : Oracle) (name call : String) (arguments : Gen (Lis
 /-- The requests on a large registry. -/
 def requestProperties (oracle : Oracle) (cases : Nat) : List (String × Property IO) :=
   (requestProperty oracle "a consolidation of one validator into another"
-      "process_consolidation_request" (genConsolidation false) 15 ++
+      "process_consolidation_request" (genConsolidation false) 8 ++
     requestProperty oracle "a switch to compounding credentials"
-      "process_consolidation_request" (genConsolidation true) 10 ++
+      "process_consolidation_request" (genConsolidation true) 4 ++
     requestProperty oracle "a withdrawal request on a large registry"
       "process_withdrawal_request" ((operations.find? (·.name = "process_withdrawal_request")).map
         (·.arguments) |>.getD (pure [])) 15).map

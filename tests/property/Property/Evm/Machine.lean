@@ -317,6 +317,12 @@ structure FrameContext where
   fork : Fork × String
   oracle : Oracle
   gas : Nat
+  /-- The share of sequences, in percent, in which a DUP or a SWAP must run.
+
+  A run of few sequences stays at small sizes, where sequences are short and the share is low.
+
+  So a short run asks for none. -/
+  minimum : Nat := 0
 
 /-- What a frame shows after code ran, in the text form of the oracle. -/
 def showFrame {fork : Fork} (evm : Evm fork Nat) : String :=
@@ -408,7 +414,7 @@ instance : Command StackCommand FrameState FrameContext IO where
     -- One command in the family reaches one past the stack, to see the underflow.
     if c.byte ≥ 0x90 then n + 1 ≤ depth else n ≤ depth
   apply c s := do
-    cover 8 "a DUP or SWAP ran" true
+    cover c.ctx.minimum "a DUP or SWAP ran" true
     stepBoth c.ctx ⟨#[c.byte]⟩ s
   label c := s!"{if c.byte ≥ 0x90 then "SWAP" else "DUP"}{c.byte.toNat % 16 + 1}"
   build ctx := StackCommand.mk ctx <$> Gen.integral (.constant 0x80 0x9f)

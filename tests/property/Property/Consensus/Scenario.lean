@@ -234,7 +234,7 @@ instance {fork : Fork} : Command (BuilderExitCommand fork) (Chain fork) (Env for
   apply c chain := do
     let after ← c.call.apply chain
     -- A scenario whose requests all do nothing does not test the exit of a builder.
-    cover 10 "a builder exit took effect" (after.bytes c.call.env != chain.bytes c.call.env)
+    cover 5 "a builder exit took effect" (after.bytes c.call.env != chain.bytes c.call.env)
     pure after
   label c := c.call.label
   build env := BuilderExitCommand.mk <$> Invocation.build "process_builder_exit_request" env

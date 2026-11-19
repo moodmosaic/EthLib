@@ -290,9 +290,10 @@ def main (args : List String) : IO UInt32 := do
       (deepStackMachine.property (.linear 1 30)).withTests cases) ::
     ([4, 5, 8, 11, 12, 17, 19, 20, 21].filterMap fun i => forks[i]?).flatMap fun fork =>
       [(s!"a frame steps as the reference at {fork.2} (Command, madhouse)",
-        (frameScenario .madhouse ⟨fork, oracle, 3000000⟩).withTests cases),
+        (frameScenario .madhouse
+          ⟨fork, oracle, 3000000, if cases ≥ 300 then 5 else 0⟩).withTests cases),
        (s!"a frame steps as the reference at {fork.2} (Command, in order)",
-        frameScenario .deterministic ⟨fork, oracle, 100000⟩)]
+        frameScenario .deterministic ⟨fork, oracle, 100000, 0⟩)]
   let properties := properties ++ machines
   let ok ← checkGroup "evm" (properties.filter fun (name, _) => wanted name)
   -- What the campaign found: these fail by design, and show their counterexample.

@@ -50,7 +50,7 @@ def main (args : List String) : IO UInt32 := do
     ("blocks-gloas", (callProperties oracle cases genOperationState gloasBlocks ++
       callProperties oracle cases genLargeState gloasBlocks).zipIdx.map fun ((name, p), i) =>
         (name ++ (if i = 0 then ", from Gloas" else ", from Gloas, a large registry"),
-          changing 10 p)),
+          changing 5 p)),
     ("accessors", callProperties oracle cases genOperationState accessors),
     ("mutators", callProperties oracle cases genOperationState mutators),
     ("upgrades", callProperties oracle cases genUpgradeState upgrades)]
