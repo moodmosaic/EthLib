@@ -51,11 +51,17 @@ def genConsolidation (same : Bool) : Gen (List String) := do
   let target ← if same then pure source else Gen.nat (.constant 0 15)
   pure [s!"{address},{source},{target}"]
 
-/-- A call of `operations` under another name, on these states, with a minimum of cases in
-which it changes the state.
+/-- The property with a minimum of cases in which its call changes the state.
 
 A class named twice keeps the greater minimum, so naming it here with nothing counted adds the
 minimum to the class that the comparison counts. -/
+def changing (minimum : Nat) (p : Property IO) : Property IO :=
+  { p with test := (fun test => do
+      cover minimum "the state changed" false
+      test) <$> p.test }
+
+/-- A call of `operations` under another name, on these states, with a minimum of cases in
+which it changes the state. -/
 def requestProperty (oracle : Oracle) (name call : String) (arguments : Gen (List String))
     (minimum : Nat) : List (String × Property IO) :=
   match operations.find? (·.name = call) with
@@ -63,10 +69,7 @@ def requestProperty (oracle : Oracle) (name call : String) (arguments : Gen (Lis
   | some found =>
     let words :=
       (fun state arguments => state ++ ["|"] ++ arguments) <$> genLargeState <*> arguments
-    let p := agrees oracle found.forks found.name words found.run
-    [(name, { p with test := (fun test => do
-        cover minimum "the state changed" false
-        test) <$> p.test })]
+    [(name, changing minimum (agrees oracle found.forks found.name words found.run))]
 
 /-- The requests on a large registry. -/
 def requestProperties (oracle : Oracle) (cases : Nat) : List (String × Property IO) :=

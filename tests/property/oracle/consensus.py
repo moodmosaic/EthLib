@@ -348,7 +348,7 @@ def stats():
     if os.environ.get("ORACLE_REASONS"):
         # Why the reference refused, for tuning a generator: the main reasons.
         for call, reasons in sorted(REASONS.items()):
-            top = sorted(reasons.items(), key=lambda kv: -kv[1])[:4]
+            top = sorted(reasons.items(), key=lambda kv: -kv[1])[:12]
             print(call, top, file=sys.stderr)
     REASONS.clear()
     return out or "-"

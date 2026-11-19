@@ -223,6 +223,26 @@ def blocks : List Call := [
     withArgument (BeaconBlock Preset.minimal fork) bytes fun block =>
       .ofState (processBlock Config.minimal checks (ExecutionEngine.constant true) s block)⟩]
 
+/-- A block from Gloas, whole: the parent's payload, header, withdrawals, bid, RANDAO, deposit
+vote, operations with payload attestations, sync aggregate.
+
+The numbers say what is wrong with it, mostly nothing: the slot, the proposer, the parent root,
+the RANDAO reveal, the parent's payload (full, empty, full with other requests, empty with
+requests), the kind of request, a seed, the sync aggregate, the slot of the bid, and the number
+and the kind of the payload attestations. -/
+def gloasBlocks : List Call := [
+  ⟨"process_block", forksFrom .glamsterdam,
+    genWord [num (Gen.frequency [(9, pure 0), (1, pure 1)]),
+      num (Gen.frequency [(9, pure 0), (1, pure 1)]), genOk, genOk,
+      num (Gen.frequency [(4, pure 0), (4, pure 1), (1, pure 2), (1, pure 3)]),
+      num (Gen.nat (.constant 0 4)), num (Gen.nat (.linear 0 60)), genOk,
+      num (Gen.frequency [(9, pure 0), (1, pure 1)]),
+      num (Gen.frequency [(2, pure 0), (3, pure 1), (2, pure 2), (1, Gen.element [4, 5])]),
+      num (Gen.frequency [(8, pure 1), (1, pure 0), (1, pure 2), (1, pure 3)])],
+    fun fork s _ bytes =>
+    withArgument (BeaconBlock Preset.minimal fork) bytes fun block =>
+      .ofState (processBlock Config.minimal checks (ExecutionEngine.constant true) s block)⟩]
+
 /-- The properties of a list of calls: each agrees with consensus-specs at each of its forks. -/
 def callProperties (oracle : Oracle) (cases : Nat) (genWords : Gen (List String))
     (calls : List Call) : List (String × Property IO) :=

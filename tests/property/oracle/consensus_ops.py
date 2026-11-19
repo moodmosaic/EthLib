@@ -7,6 +7,7 @@ needs a deposit root), so the caller writes the state after it.
 """
 
 import hashlib
+import inspect
 
 from eth_consensus_specs.utils import bls
 
@@ -498,6 +499,32 @@ def consolidation_request(spec, fork, state, f):
     )
 
 
+def sync_participant_keys(spec, state, bits, keys):
+    """The keys that the fork checks a sync aggregate against.
+
+    From Gloas the check takes the aggregate key of the committee when all took part, and that
+    key less the keys of those who did not when more than half did.
+    """
+    if "aggregate_pubkey" not in inspect.getsource(spec.process_sync_aggregate):
+        return keys
+    committee = state.current_sync_committee
+    size = int(spec.SYNC_COMMITTEE_SIZE)
+    if len(keys) == size:
+        return [committee.aggregate_pubkey]
+    if len(keys) > size // 2:
+        absent = [k for k, bit in zip(committee.pubkeys, bits, strict=False) if not bit]
+        try:
+            key = spec.bls.add(
+                spec.bls.bytes48_to_G1(committee.aggregate_pubkey),
+                spec.bls.neg(spec.bls.bytes48_to_G1(spec.eth_aggregate_pubkeys(absent))),
+            )
+        except Exception:
+            # The aggregate key of the state is no point: the check fails with any signature.
+            return keys
+        return [spec.BLSPubkey(spec.bls.G1_to_bytes48(key))]
+    return keys
+
+
 def sync_aggregate(spec, fork, state, f):
     seed, ok = f
     size = int(spec.SYNC_COMMITTEE_SIZE)
@@ -511,7 +538,7 @@ def sync_aggregate(spec, fork, state, f):
         root = spec.get_block_root_at_slot(state, previous)
     except Exception:
         root = spec.Root()
-    signature = signed(spec, keys, root, domain, ok)
+    signature = signed(spec, sync_participant_keys(spec, state, bits, keys), root, domain, ok)
     if not keys and ok:
         signature = G2_INFINITY
     return spec.SyncAggregate(
@@ -563,6 +590,129 @@ def show_withdrawals(spec, state):
     return "[" + ",".join(rows) + "]" + "/" + ",".join(map(str, counts))
 
 
+def payload_attestation(spec, state, parent_root, seed, kind):
+    """From Gloas: an attestation of the committee of the slot before, or none.
+
+    The kind says what is wrong with it: 1 nothing, 0 the signature, 2 the root, 3 the slot.
+    """
+    slot = max(int(state.slot), 1) - 1
+    try:
+        committee = [int(i) for i in spec.get_ptc(state, spec.Slot(slot))]
+    except Exception:
+        return None
+    bits = seeded_bits(seed, len(committee))
+    members = sorted(i for i, bit in zip(committee, bits, strict=False) if bit)
+    data = spec.PayloadAttestationData(
+        beacon_block_root=parent_root if kind != 2 else sha(b"other parent"),
+        slot=slot if kind != 3 else slot + 1,
+        payload_present=seed % 2 == 0,
+        blob_data_available=seed % 3 == 0,
+    )
+    domain = spec.get_domain(state, spec.DOMAIN_PTC_ATTESTER, spec.compute_epoch_at_slot(data.slot))
+    keys = [key_at(state, i) for i in members]
+    return spec.PayloadAttestation(
+        aggregation_bits=field_of(spec.PayloadAttestation, "aggregation_bits", bits),
+        data=data,
+        signature=signed(spec, keys, data, domain, kind != 0),
+    )
+
+
+def parent_requests(spec, state, kind):
+    """From Gloas: the requests of the parent's payload, of a kind or none."""
+    requests = spec.ExecutionRequests()
+    if kind == 1:
+        requests.withdrawals.append(
+            spec.WithdrawalRequest(
+                source_address=address_at(state, 0, 9),
+                validator_pubkey=key_at(state, 0),
+                amount=0,
+            )
+        )
+    elif kind == 2:
+        requests.consolidations.append(
+            spec.ConsolidationRequest(
+                source_address=address_at(state, 1, 9),
+                source_pubkey=key_at(state, 1),
+                target_pubkey=key_at(state, 1),
+            )
+        )
+    elif kind == 3 and len(state.builders) > 0:
+        requests.builder_exits.append(
+            spec.BuilderExitRequest(
+                source_address=bytes(state.builders[0].execution_address),
+                pubkey=state.builders[0].pubkey,
+            )
+        )
+    elif kind == 4:
+        requests.deposits.append(
+            spec.DepositRequest(
+                pubkey=pubkey(700),
+                withdrawal_credentials=credentials(1, 3),
+                amount=32 * 10**9,
+                signature=b"\x09" * 96,
+                index=0,
+            )
+        )
+    return requests
+
+
+def gloas_block(spec, fork, state, f):
+    """From Gloas: a block for the state, valid but for what the numbers break.
+
+    The parent's payload is full or empty, by the hash that the bid builds on.
+    The state gets the parent's bid that the block then answers to.
+    """
+    (
+        slot_delta,
+        proposer_delta,
+        parent_ok,
+        randao_ok,
+        parent,
+        kind,
+        seed,
+        sync_ok,
+        bid_slot_delta,
+        attestations,
+        attestation_kind,
+    ) = f
+    try:
+        proposer = int(spec.get_beacon_proposer_index(state))
+    except Exception:
+        proposer = 0
+    epoch = spec.get_current_epoch(state)
+    body = spec.BeaconBlockBody()
+    domain = spec.get_domain(state, spec.DOMAIN_RANDAO)
+    body.randao_reveal = signed(spec, [key_at(state, proposer)], epoch, domain, randao_ok)
+    if hasattr(body, "eth1_data"):
+        body.eth1_data = spec.Eth1Data(deposit_count=seed % 4)
+    body.sync_aggregate = sync_aggregate(spec, fork, state, [seed, sync_ok])
+    # The parent: 0 full, 1 empty, 2 full with other requests, 3 empty with requests.
+    requests = parent_requests(spec, state, kind if parent != 1 else 0)
+    full_hash = sha(b"the payload of the parent")
+    state.latest_execution_payload_bid.block_hash = full_hash
+    state.latest_execution_payload_bid.execution_requests_root = (
+        requests.hash_tree_root() if parent != 2 else sha(b"other requests")
+    )
+    body.parent_execution_requests = requests
+    self_build = int(spec.BUILDER_INDEX_SELF_BUILD)
+    bid = payload_bid(spec, fork, state, [self_build, 0, 2, bid_slot_delta, 1, 1, 1, 1, 0])
+    if parent in (0, 2):
+        bid.message.parent_block_hash = full_hash
+    body.signed_execution_payload_bid = bid
+    parent_root = state.latest_block_header.hash_tree_root() if parent_ok else sha(b"x")
+    made = [
+        payload_attestation(spec, state, parent_root, seed + i, attestation_kind)
+        for i in range(attestations)
+    ]
+    body.payload_attestations = [a for a in made if a is not None]
+    return spec.BeaconBlock(
+        slot=(int(state.slot) + slot_delta) % 2**64,
+        proposer_index=(proposer + proposer_delta) % 2**64,
+        parent_root=parent_root,
+        body=body,
+    )
+
+
 def block(spec, fork, state, f):
     """A block for the state, valid but for what the numbers break."""
     (
@@ -576,7 +726,9 @@ def block(spec, fork, state, f):
         seed,
         sync_ok,
         deposits,
-    ) = f
+    ) = f[:10]
+    if hasattr(spec.BeaconBlockBody(), "signed_execution_payload_bid"):
+        return gloas_block(spec, fork, state, f)
     try:
         proposer = int(spec.get_beacon_proposer_index(state))
     except Exception:
