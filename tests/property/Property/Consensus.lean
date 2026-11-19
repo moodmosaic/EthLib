@@ -1,5 +1,6 @@
 import Property.Consensus.Epoch
 import Property.Consensus.Operations
+import Property.Consensus.Requests
 import Property.Consensus.DepositTree
 import Property.Consensus.Scenario
 import Property.Consensus.Helpers
@@ -36,6 +37,7 @@ def main (args : List String) : IO UInt32 := do
     ("scenario", scenarios.flatten),
     ("epoch", stepProperties oracle cases),
     ("operations", callProperties oracle cases genOperationState operations),
+    ("requests", requestProperties oracle cases),
     ("blocks", callProperties oracle cases genOperationState blocks),
     ("accessors", callProperties oracle cases genOperationState accessors),
     ("mutators", callProperties oracle cases genOperationState mutators),
