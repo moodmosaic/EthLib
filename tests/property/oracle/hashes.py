@@ -567,6 +567,9 @@ def answer(w):
             return tohex(keccak256(unhex(data)))
         case ["keccak512", data]:
             return tohex(keccak512(unhex(data)))
+        case ["keccak", bits, data]:
+            # Keccak of a digest of 224, 256, 384 or 512 bits: the rate is 200 - bits / 4 bytes.
+            return tohex(keccak.new(digest_bits=int(bits), data=unhex(data)).digest())
         case ["sha256", data]:
             return tohex(sha256(unhex(data)))
         case ["ripemd160", data]:

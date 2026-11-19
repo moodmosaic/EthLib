@@ -24,6 +24,7 @@ def main (args : List String) : IO UInt32 := do
   let ok ← checkGroup "hashes" [
     ("Keccak-256", (keccak256 oracle).withTests cases),
     ("Keccak-512", (keccak512 oracle).withTests cases),
+    ("the Keccak sponge at each rate of the family", (keccakRates oracle).withTests cases),
     ("SHA-256", (sha256 oracle).withTests cases),
     ("RIPEMD-160", (ripemd160 oracle).withTests cases),
     ("CRC-32 and CRC-32C", (crc oracle).withTests cases),

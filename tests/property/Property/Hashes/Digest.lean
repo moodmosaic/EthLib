@@ -20,6 +20,25 @@ def keccak512 (oracle : Oracle) : Property IO := propertyM do
   let msg ← forAll (genMsg 72 4)
   pure do hexv (Keccak.keccak512 msg) === (← oracle.ask ["keccak512", hex msg])
 
+/-- The sponge at each rate of the Keccak family is the reference's: 144, 136, 104 and 72 bytes.
+
+The state after the last block holds the digest in its first bytes.
+At 144 bytes a block fills lane 17, which Keccak-256 and Keccak-512 leave to the capacity: a
+block step that XORs only the lanes of Keccak-256 drops those bytes. -/
+def keccakRates (oracle : Oracle) : Property IO := propertyM do
+  let bits ← forAll (Gen.element [224, 256, 384, 512])
+  let rate := 200 - bits / 4
+  let msg ← forAll (genMsg rate 4)
+  pure do
+    let s := Keccak.spongeAbsorb Keccak.keccakF rate msg
+    let lanes := [s.a0, s.a1, s.a2, s.a3, s.a4, s.a5, s.a6, s.a7, s.a8, s.a9, s.a10, s.a11, s.a12,
+      s.a13, s.a14, s.a15, s.a16, s.a17, s.a18, s.a19, s.a20, s.a21, s.a22, s.a23, s.a24]
+    -- A lane is eight bytes of the state, the low byte first.
+    let bytesOf (lane : UInt64) : List UInt8 :=
+      (List.range 8).map fun i => UInt8.ofNat (lane.toNat / 256 ^ i % 256)
+    let digest := (lanes.flatMap bytesOf).take (bits / 8)
+    hex ⟨digest.toArray⟩ === (← oracle.ask ["keccak", toString bits, hex msg])
+
 /-- SHA-256 is the reference's, around 55, 56, 63, 64 and 65 bytes and their multiples. -/
 def sha256 (oracle : Oracle) : Property IO := propertyM do
   let msg ← forAll (genMsg 64 4)
