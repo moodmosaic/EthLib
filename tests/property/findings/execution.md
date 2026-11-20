@@ -13,9 +13,9 @@ It has no Glamsterdam, so round 1 compared no rule that starts there.
 Round 3 adds the branch `forks/amsterdam` of execution-specs for the forks after BPO2.
 
 No property found a place where EthLib computes another value than its source.
-One finding stands: EthLib refuses the answer that go-ethereum gives for a slot of an account with no storage, a case that EIP-1186 does not define.
+One finding was made: EthLib refused the answer that go-ethereum gives for a slot of an account with no storage, a case that EIP-1186 does not define.
 Upstream has since fixed it, in pull request #3405 for issue #3386.
-This branch is not yet rebased on that fix, so the two properties of the finding still fail here.
+This branch is rebased on that fix, so the two properties of the finding pass here, in the passing groups.
 Three places where EthLib and the reference decode differently, with the same verdict on the transaction, are listed as notes.
 
 ## What was tested
@@ -46,8 +46,8 @@ Round 3 changed the generator of nearly every row and added 12 properties: see "
 | state machine: the tracker reads as a model that copies its state (`StateMachine`) | `TransactionState`: every read and write, `restoreTxState`, `incorporateTxIntoBlock`, `BlockState.applyChanges`, at 7 forks | a model here from the text of `state.py`, one flat state copied at each snapshot | pass |
 | an answer of eth_getProof holds exactly when it is true | `AccountProof.ofState`, `verify`, `verifyAccount`, `verifySlot`, `stateRoot`, `storageRoot` | the model of the tracker; one field changed must be refused | pass |
 | scenario: the tracker beside state.py, at 7 forks (`Command`, madhouse) | the same operations, and `stateRoot` at the end of each transaction | EELS `state.py` at Tangerine Whistle, Spurious Dragon, Istanbul, London, Paris, Cancun, Osaka | pass, 2,000 sequences each |
-| OPEN: the empty proof shows absence in the empty trie | `verifyProof` | py-trie | fails, 100 cases |
-| OPEN: go-ethereum's answer for a slot of an empty storage holds | `AccountProof.verify` | go-ethereum `GetProof` | fails, 100 cases |
+| the empty proof shows absence in the empty trie | `verifyProof` | py-trie | failed until #3405; pass |
+| go-ethereum's answer for a slot of an empty storage holds | `AccountProof.verify` | go-ethereum `GetProof` | failed until #3405; pass |
 
 The generators were checked before they were trusted.
 With `EXECUTION_ORACLE_STATS=1` the oracle counts its answers.
@@ -56,10 +56,11 @@ So each acceptance test has both verdicts in number.
 
 ## Findings
 
-### OPEN: the proof of a key in the empty trie
+### FIXED: the proof of a key in the empty trie
 
-Status in round 3: upstream fixed this in pull request #3405, for issue #3386.
-This branch is not yet rebased on the fix, so both properties still fail here, in the group that must fail.
+Upstream fixed this in pull request #3405, for issue #3386.
+This branch is rebased on the fix, so both properties pass here, and the driver has no group of findings.
+What follows is the finding as it was made, on the tree before the fix.
 After the next rebase they move to the passing groups.
 
 Classification: BUG of interoperability, by the second check below; OPEN by the text of EIP-1186 alone.
@@ -204,7 +205,8 @@ This round labelled every case of every property, read the shares, repaired the 
     lake exe execution-property 1000
     HEDGEHOG_ONLY="trie,proof,range" lake exe execution-property 5000
 
-The driver now has 39 properties that must pass and 2 that must fail.
+The driver then had 39 properties that must pass and 2 that must fail.
+Since the rebase on pull request #3405 all 41 must pass.
 The last runs were on this branch, with both references installed:
 
 - 1,000 cases, twice: the 39 properties passed and the two of the finding failed as they must, with the exit code 0.
@@ -478,15 +480,14 @@ Checks added to the properties of round 1:
 
 ### The finding of round 1: the empty proof of the empty trie
 
-The two properties of the group `execution: findings (each must fail)` still fail on this branch, as they must:
+The two properties of the finding failed on the tree before the fix, in a group that must fail:
 
     ✗ OPEN: the empty proof shows absence in the empty trie failed after 1 test and 2 shrinks.
     ✗ OPEN: go-ethereum's answer for a slot of an empty storage holds failed after 1 test and 2 shrinks.
 
 The finding was reported upstream as issue #3386, and upstream fixed it in pull request #3405.
-This branch is not yet rebased on that fix, so `verifyProof` here still refuses the proof with no node.
-After the next rebase both properties pass, and the `mustFail` group then reports that the finding is gone.
-They then move to the passing groups: "the empty proof shows absence in the empty trie" beside the proof properties, and the answer of go-ethereum beside "an answer of eth_getProof holds exactly when it is true".
+After the rebase on that fix both passed, and the `mustFail` group reported that the finding was gone.
+They are now in the passing groups: "the empty proof shows absence in the empty trie" beside the proof properties, and the answer of go-ethereum beside "an answer of eth_getProof holds exactly when it is true".
 
 ### Notes of round 3, none a finding
 

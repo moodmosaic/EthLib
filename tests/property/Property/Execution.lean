@@ -74,21 +74,15 @@ def main (args : List String) : IO UInt32 := do
     ("a proof of a trie built node by node shows what its nodes say",
       (forgedProof oracle).withTests cases),
     ("a proof whose path meets an item that is no node is refused", brokenNode.withTests cases),
+    ("the empty proof shows absence in the empty trie", (emptyTrieProof oracle).withTests cases),
     ("a range of a trie is accepted exactly when it is true",
       (rangeProof oracle).withTests cases)] selection
   let proofs ← checkGroup "execution: account proofs" [
-    ("an answer of eth_getProof holds exactly when it is true", accountProofs.withTests cases)]
-    selection
+    ("an answer of eth_getProof holds exactly when it is true", accountProofs.withTests cases),
+    ("go-ethereum's answer for a slot of an empty storage holds",
+      emptyStorageAnswer.withTests cases)] selection
   -- Scenarios of commands, in madhouse mode whatever the environment says.
   let scenarios ← checkGroup "execution: scenarios" (trackerForks.map fun fork =>
     (s!"scenario: the tracker beside state.py at {fork.2}",
       (trackerScenario .madhouse ⟨oracle, fork⟩).withTests cases)) selection
-  -- What the campaign found: each of these must fail, and shows its counterexample.
-  --
-  -- The group does not change the exit code.
-  let _ ← checkGroup "execution: findings (each must fail)" [
-    ("OPEN: the empty proof shows absence in the empty trie",
-      (emptyTrieProof oracle).withTests 100),
-    ("OPEN: go-ethereum's answer for a slot of an empty storage holds",
-      emptyStorageAnswer.withTests 100)] selection (mustFail := true)
   pure (if ok && tries && proofs && scenarios then 0 else 1)

@@ -573,7 +573,7 @@ The empty trie has no node, so a proof by "the nodes on the path" (EIP-1186) lis
 
 py-trie builds the empty proof, and reads it as the absence of the key.
 
-EthLib builds the proof `[0x80]` and refuses the empty one, so this property fails.
+EthLib refused the empty proof when the campaign began, and takes it since pull request #3405.
 
 See the findings. -/
 def emptyTrieProof (oracle : Oracle) : Property IO := propertyM do

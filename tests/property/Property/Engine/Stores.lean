@@ -438,7 +438,8 @@ def responsesRead (oracle : Oracle) : Property IO := propertyM do
 /-- One error of each kind that a method of EthLib can return. -/
 def errorSamples : List EngineError :=
   [.invalidParams "", .unsupportedFork none, .invalidForkchoiceState ZERO_HASH ZERO_HASH,
-    .tooLargeRequest 0 0, .invalidPayloadAttributes, .unknownPayload (Vector.replicate 8 0)]
+    .tooLargeRequest 0 0, .invalidPayloadAttributes, .unknownPayload (Vector.replicate 8 0),
+    .tooDeepReorg]
 
 /-- The table of Errors of `common.md`, for the codes that the Engine API adds and `-32602`. -/
 def errorTable : List (Int × String) :=

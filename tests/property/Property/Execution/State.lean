@@ -741,7 +741,9 @@ namespace ExecutionProperty
 
 go-ethereum answers a slot of an empty storage trie with the word 0 and no proof node.
 
-EthLib refuses that answer, so this property fails: see the findings. -/
+EthLib refused that answer when the campaign began, and takes it since pull request #3405.
+
+See the findings. -/
 def emptyStorageAnswer : Property IO := pureIO do
   let balance ← forAll (Gen.nat (.constant 1 100))
   let key ← forAll genSlotIndex

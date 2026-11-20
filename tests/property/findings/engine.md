@@ -7,7 +7,8 @@ The specification is execution-apis at commit `3284ee8`: `src/engine/*.md` and `
     .venv/bin/pip install --no-deps -r oracle/requirements-engine.txt
     lake exe engine-property 1000
 
-The last run was at 1,000 cases: 16 properties passed, and the 2 of the group `engine: findings` failed, as they must.
+The last run at 1,000 cases was before the rebase on pull request #3402: 16 properties passed, and the 2 of the group `engine: findings` failed, as they must.
+After the rebase, at 100 cases, 17 pass and the one left in that group fails.
 An earlier run at 2,000 cases gave the same result for the properties that existed then.
 
 ## What was tested
@@ -31,7 +32,7 @@ An earlier run at 2,000 cases gave the same result for the properties that exist
 | a node answers its calls, in madhouse mode (`Command`, `scenario .madhouse`) | `newPayloadWithoutState`, `forkchoiceUpdatedCall`, `payloadId`, `getPayload`, `acceptsGetPayloadFork`, `payloadOfBlock`, `ExecutionPayload.ofBlock`, `getPayloadResultJson`, `getPayloadResultOfJson` | the forkchoice model, the oracle's payloads, and tables from the fork files | 1,000 sequences of 1 to 15 commands | pass |
 | a node answers long sequences of calls (the same `Command`s, run with `executeCommands`) | the same | the same | 250 sequences of up to 60 commands | pass |
 | a base type reads as the Encoding of common.md says | the readers of `JsonRpc` | the two patterns of the section Encoding of `common.md` | 1,000 | **fails: finding 1** |
-| each error code of common.md is an error of EthLib | `EngineError` | the table of Errors | 1 | **fails: finding 2** |
+| each error code of common.md is an error of EthLib | `EngineError` | the table of Errors | 1 | failed until #3402 (finding 2); pass |
 
 The state machine tests are the two marked `StateMachine` and the two marked `Command`.
 The three commands are `NewPayloadCmd`, `ForkchoiceCmd` and `GetPayloadCmd`, in `Property/Engine/Node.lean`.
@@ -56,7 +57,11 @@ A trace of one run of the node scenario showed a build returned by every version
 - What would decide it: a statement by the maintainers of which text governs the Engine API.
 - Command: `lake exe engine-property 1000`, property "a base type reads as the Encoding of common.md says".
 
-### 2. DOC (an omission): no error `-38006: Too deep reorg`
+### 2. DOC (an omission, FIXED): no error `-38006: Too deep reorg`
+
+Reported upstream as issue #3387, and fixed in pull request #3402, which adds `EngineError.tooDeepReorg`.
+The property passes on this branch since its rebase on that fix, in the passing group.
+What follows is the finding as it was made.
 
 - Definition: `EthLib/Engine/Payload.lean:141` (`EngineError`) and `EthLib/Engine/Json.lean:267` (`EngineError.message`), which says it is "from the table of Errors in `common.md`".
 - The table has seven Engine rows, and `EngineError` has six constructors: `-38006` is missing.

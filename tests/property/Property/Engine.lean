@@ -36,12 +36,12 @@ def main (args : List String) : IO UInt32 := do
     ("the methods are those of the specification", (methodList oracle).withTests 1),
     ("a structure of a response reads as its fields say", (responsesRead oracle).withTests cases),
     ("an error has the code and the message of common.md", errorsOfTable.withTests 1),
+    ("each error code of common.md is an error of EthLib", errorsComplete.withTests 1),
     ("a node answers its calls, in madhouse mode", (nodeScenario oracle).withTests cases),
     ("a node answers long sequences of calls", (nodeLongScenario oracle).withTests (cases / 4))]
     selection
-  -- Each property of this group states what EthLib does not do, and must fail.
+  -- The property of this group states what EthLib does not do, and must fail.
   let findings ← checkGroup "engine: findings" [
-    ("a base type reads as the Encoding of common.md says", (wireEncoding oracle).withTests cases),
-    ("each error code of common.md is an error of EthLib", errorsComplete.withTests 1)]
+    ("a base type reads as the Encoding of common.md says", (wireEncoding oracle).withTests cases)]
     selection (mustFail := true)
   pure (if ok && findings then 0 else 1)
