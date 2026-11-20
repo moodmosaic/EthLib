@@ -50,6 +50,8 @@ def main (args : List String) : IO UInt32 := do
   -- What EthLib does not do as its text says: each property fails by design.
   let found ← checkGroup "rpc: findings" [
     ("finding: a precompile that lacks gas gets code 801",
-      (precompileLacksGas oracle).withTests cases)]
+      (precompileLacksGas oracle).withTests cases),
+    ("finding: an AccountRange with a nested account body is read",
+      nestedAccountBody.withTests cases)]
     (← Selection.fromEnv) (mustFail := true)
   pure (if ok && found then 0 else 1)

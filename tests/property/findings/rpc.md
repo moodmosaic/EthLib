@@ -11,7 +11,7 @@ The oracle is `oracle/rpc.py`, which loads `oracle/rpc_fees.py`, `rpc_logs.py`, 
     HEDGEHOG_ONLY="finding" lake exe rpc-property 100
 
 The scope is `EthLib/Execution/Rpc/`, `Network/`, `History/` and `ErrorFormat.lean`, which no earlier round tested.
-A run of 1,000 cases takes 105 seconds: 18 properties pass, and one finding fails by design in its own group.
+A run of 1,000 cases takes 105 seconds: 18 properties pass, and the findings fail by design in their own group: one in that run, and two since the property of finding 2 was added.
 
 No property found a place where EthLib computes another value than its source.
 One answer differs from what EthLib's own text says, and one point is open against a client that was not run.
@@ -62,6 +62,7 @@ Each row is 1,000 cases unless it says otherwise.
 | era1: the limit of 8192 blocks (6) | `MAX_ERA1_BLOCKS`, `accumulatorRoot` | 8192 and 8193 blocks | `rpc_era.py` | pass |
 | errors: an error shows its constructor and its named values | `namedArg`, `constructorFormat`, the `ErrorArg` instances, `Era1Error.reprPrec` | bytes, a hash, a word, an option, both precedences | the text itself | pass |
 | finding: a precompile that lacks gas gets code 801 (`mustFail`) | `haltError` | 23 forks, precompiles 1 to 4, a gas limit of 21000 to 21010 | `rpc_call.py` | **fails: finding 1** |
+| finding: an AccountRange with a nested account body is read (`mustFail`) | `SnapMessage.decode`, `RangeEntry.ofItem` | one account, its body as a byte string and as a nested list | go-ethereum, Besu and reth, as read | **fails: finding 2** |
 
 ### The shares of the labels, at 1,000 cases
 
@@ -117,6 +118,9 @@ Each row is 1,000 cases unless it says otherwise.
 - I did not run go-ethereum and have no capture of a real message, so this is a question and not a result.
 - What would decide it: one AccountRange message of a client, or the encoder of two clients.
 - The property "snap: a message reads as snap.md says" follows the letter of `snap.md`, so it passes.
+- The property "finding: an AccountRange with a nested account body is read" builds one account in both forms.
+  EthLib reads the byte string and refuses the nested list, so the property fails, in the group that must fail.
+  It was added after the coordinator's check below.
 
 ### Choices that EthLib writes down, seen by the properties and not findings
 

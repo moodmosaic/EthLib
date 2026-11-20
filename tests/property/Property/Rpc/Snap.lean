@@ -171,4 +171,24 @@ def slimAccountValue (oracle : Oracle) : Property IO := propertyM do
       want === "error"
       cover 5 "a body that is not slim has none" true
 
+/-- An AccountRange is read with the body of its account as a nested list, as clients write it.
+
+go-ethereum, Besu and reth write the slim account as a list inside the entry.
+
+`snap.md` writes a byte string that holds that list, and EthLib reads that form alone.
+
+So the first check passes and the second fails: see the findings. -/
+def nestedAccountBody : Property IO := pureIO do
+  let hash ← forAllWith hex (genBytesN 32)
+  let nonce ← forAllWith showItem (genShape (.scalar 64))
+  let balance ← forAllWith showItem (genShape (.scalar 256))
+  let body := Item.list [nonce, balance, .bytes .empty, .bytes .empty]
+  let read (body : Item) : Bool :=
+    let message := Item.list [.bytes (bytesOf [1]), .list [.list [.bytes hash, body]], .list []]
+    match encode message with
+    | .ok data => (SnapMessage.decode .snap1 0x01 data).isOk
+    | .error _ => false
+  ensure (read (.bytes ((encode body).toOption.getD .empty))) "the body as a byte string is refused"
+  ensure (read body) "the body as a nested list is refused"
+
 end RpcProperty
