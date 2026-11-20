@@ -47,25 +47,30 @@ def coinbaseAddress : Address := addressOf 0xba 0x5e
 /-- A 32-byte word of a number. -/
 def word32 (n : Nat) : Bytes32 := U256.toBeBytes (BitVec.ofNat 256 n)
 
-/-- The block that every run uses, the one of `oracle/evm.py`. -/
-def blockEnv (fork : Fork) : BlockEnvironment fork where
-  chainId := 1
+/-- The block of a run, the one of `oracle/evm.py`.
+
+With `big`, each number of the block is near the top of its type.
+
+An instruction that cut one to 64 bits, or to 32, would show there and not on a small block. -/
+def blockEnv (fork : Fork) (big : Bool := false) : BlockEnvironment fork where
+  chainId := if big then (2 ^ 64 - 1 : Nat).toUInt64 else 1
   coinbase := coinbaseAddress
-  number := 1000
-  gasLimit := 30000000
-  timestamp := 1700000000
-  difficulty := 0x20000
+  number := if big then 2 ^ 63 + 1000 else 1000
+  gasLimit := if big then 2 ^ 64 - 1 else 30000000
+  timestamp := if big then BitVec.ofNat 256 (2 ^ 255 + 3) else 1700000000
+  difficulty := if big then 2 ^ 200 + 7 else 0x20000
   blockHashes := (List.range 256).map fun i => word32 (i + 1)
-  baseFeePerGas := fun _ => 7
-  prevRandao := fun _ => Vector.replicate 32 0x11
-  excessBlobGas := fun _ => (10 * 2 ^ 17 : Nat).toUInt64
+  baseFeePerGas := fun _ => if big then 2 ^ 100 + 1 else 7
+  prevRandao := fun _ => Vector.replicate 32 (if big then 0xff else 0x11)
+  -- An excess at which each blob schedule gives another blob gas price.
+  excessBlobGas := fun _ => (60000000 : Nat).toUInt64
   parentBeaconBlockRoot := fun _ => Vector.replicate 32 0x22
   slotNumber := fun _ => 0
 
-/-- The transaction that every run uses. -/
-def txEnv (fork : Fork) : TransactionEnvironment fork where
+/-- The transaction of a run, with a gas price near the top of a word when `big`. -/
+def txEnv (fork : Fork) (big : Bool := false) : TransactionEnvironment fork where
   origin := callerAddress
-  gasPrice := 10
+  gasPrice := if big then 2 ^ 255 + 10 else 10
   blobVersionedHashes := fun _ =>
     [Vector.ofFn fun i => if i.val = 0 then 0x01 else 0xb1,
      Vector.ofFn fun i => if i.val = 0 then 0x01 else 0xb2]
@@ -113,10 +118,10 @@ def startSubstate : Substate :=
     accessedAddresses := ((∅ : Std.ExtTreeSet Address).insert callerAddress).insert targetAddress }
 
 /-- A message from the caller to the target, or a creation at the target. -/
-def messageOf (fork : Fork) (create static : Bool) (gas value : Nat) (data code : ByteArray) :
-    Message fork where
-  blockEnv := blockEnv fork
-  txEnv := txEnv fork
+def messageOf (fork : Fork) (create static : Bool) (gas value : Nat) (data code : ByteArray)
+    (big : Bool := false) : Message fork where
+  blockEnv := blockEnv fork big
+  txEnv := txEnv fork big
   caller := callerAddress
   target := if create then none else some targetAddress
   currentTarget := targetAddress
@@ -188,8 +193,8 @@ def showResult {fork : Fork} (accounts : List PreAccount) (evm : Evm fork Nat) :
 
 /-- Run a message in EthLib and print what it left, with the error of its frame. -/
 def runEthLib (fork : Fork) (create static : Bool) (gas value : Nat) (data code : ByteArray)
-    (accounts : List PreAccount) : String × String :=
-  let message := messageOf fork create static gas value data code
+    (accounts : List PreAccount) (big : Bool := false) : String × String :=
+  let message := messageOf fork create static gas value data code big
   let state := txState accounts
   let result := if create then processCreateMessage (Meter := Nat) fork message state startSubstate
     else processMessage (Meter := Nat) fork message state startSubstate
@@ -199,9 +204,10 @@ def runEthLib (fork : Fork) (create static : Bool) (gas value : Nat) (data code 
 
 /-- The command that asks the oracle for the same run. -/
 def runCommand (name : String) (create static : Bool) (gas value : Nat) (data code : ByteArray)
-    (accounts : List PreAccount) : List String :=
+    (accounts : List PreAccount) (big : Bool := false) : List String :=
   ["run", name, if create then "create" else "call", if static then "1" else "0", toString gas,
     toString value, hex data, hex code,
-    if accounts.isEmpty then "-" else ";".intercalate (accounts.map (·.show))]
+    if accounts.isEmpty then "-" else ";".intercalate (accounts.map (·.show)),
+    if big then "big" else "small"]
 
 end EvmProperty

@@ -1,8 +1,9 @@
 """References for the EVM: the Python execution-specs (EELS), one command per line."""
 
-#     run <fork> <kind> <static> <gas> <value> <data> <code> <accounts>
+#     run <fork> <kind> <static> <gas> <value> <data> <code> <accounts> [big]
 #         Run a message with `process_message` (kind call) or
 #         `process_create_message` (kind create), and print what it left.
+#         With `big`, the numbers of the block are near the top of their types.
 #     frame <fork> <gas> <static>    Start a frame that the next commands step.
 #     op <code>                      Run `code` in it, from its first byte.
 #     pre <fork> <address> <gas> <data>   Call a precompile.
@@ -16,11 +17,17 @@
 #     extend <fork> <size> <start:size>...         The price and size of a memory growth.
 #     gaslimit <fork> <limit> <parent limit>       Whether the limit may follow.
 #     taylor <factor> <numerator> <denominator>    `fake_exponential` of EIP-4844.
+#     opcodes <fork>                 The bytes of the instructions that the fork has.
+#     precompiles <fork>             The addresses of its precompiles.
+#     bytes <fork>                   For each byte, `i` when it is no instruction, else `o`.
+#     allbut64 <gas>...              `max_message_call_gas` of each.
+#     callgas <fork> <value> <gas> <gas left> <memory> <extra>   The gas of a call.
+#     sstore <fork> <original> <current> <new> <warm> <gas>      SSTORE on such a slot.
 #
-# Bytes are in hexadecimal, `-` for none.  An account is
-# `address,nonce,balance,code,key=value&key=value`, and accounts are joined
-# with `;`.
+# Bytes are in hexadecimal, `-` for none.
+# An account is `address,nonce,balance,code,key=value&key=value`, and accounts are joined with `;`.
 
+import copy
 import dataclasses
 import importlib
 import os
@@ -40,6 +47,7 @@ CALLER = bytes.fromhex("ca" * 20)
 TARGET = bytes.fromhex("c0de" * 10)
 COINBASE = bytes.fromhex("ba5e" * 10)
 BLOB_HASHES = (b"\x01" + b"\xb1" * 31, b"\x01" + b"\xb2" * 31)
+SLOT = b"\x00" * 31 + b"\x01"
 
 
 def unhex(word):
@@ -110,23 +118,23 @@ def make_state(fork, accounts):
     return state
 
 
-def make_message(fork, state, kind, static, gas, value, data, code):
+def make_message(fork, state, kind, static, gas, value, data, code, big=False):
     hashes = [Bytes32((i + 1).to_bytes(32, "big")) for i in range(256)]
     transient = getattr(fork.state, "TransientStorage", lambda: None)()
     block_env = build(
         fork.vm.BlockEnvironment,
         {
-            "chain_id": U64(1),
+            "chain_id": U64(2**64 - 1 if big else 1),
             "state": state,
-            "block_gas_limit": Uint(30_000_000),
+            "block_gas_limit": Uint(2**64 - 1 if big else 30_000_000),
             "block_hashes": hashes,
             "coinbase": Bytes20(COINBASE),
-            "number": Uint(1000),
-            "time": U256(1_700_000_000),
-            "difficulty": Uint(0x20000),
-            "base_fee_per_gas": Uint(7),
-            "prev_randao": Bytes32(b"\x11" * 32),
-            "excess_blob_gas": U64(10 * 2**17),
+            "number": Uint(2**63 + 1000 if big else 1000),
+            "time": U256(2**255 + 3 if big else 1_700_000_000),
+            "difficulty": Uint(2**200 + 7 if big else 0x20000),
+            "base_fee_per_gas": Uint(2**100 + 1 if big else 7),
+            "prev_randao": Bytes32((b"\xff" if big else b"\x11") * 32),
+            "excess_blob_gas": U64(60_000_000),
             "parent_beacon_block_root": Bytes32(b"\x22" * 32),
         },
     )
@@ -134,7 +142,7 @@ def make_message(fork, state, kind, static, gas, value, data, code):
         fork.vm.TransactionEnvironment,
         {
             "origin": Bytes20(CALLER),
-            "gas_price": Uint(10),
+            "gas_price": Uint(2**255 + 10 if big else 10),
             "gas": Uint(gas),
             "access_list_addresses": set(),
             "access_list_storage_keys": set(),
@@ -206,7 +214,7 @@ def show_state(state):
     return ";".join(out) or "-"
 
 
-def run(name, kind, static, gas, value, data, code, accounts):
+def run(name, kind, static, gas, value, data, code, accounts, env="small"):
     fork = fork_of(name)
     state = make_state(fork, parse_accounts(accounts))
     message = make_message(
@@ -218,6 +226,7 @@ def run(name, kind, static, gas, value, data, code, accounts):
         int(value),
         unhex(data),
         unhex(code),
+        env == "big",
     )
     if kind == "create":
         evm = fork.interpreter.process_create_message(message)
@@ -251,11 +260,11 @@ def run(name, kind, static, gas, value, data, code, accounts):
 class Frame:
     """A frame that runs one instruction at a time."""
 
-    def __init__(self, name, gas, static):
+    def __init__(self, name, gas, static, slot=1):
         self.fork = fork_of(name)
         accounts = [
             (CALLER, 0, 10**18, b"", []),
-            (TARGET, 1, 10**9, b"", [(b"\x00" * 31 + b"\x01", 1)]),
+            (TARGET, 1, 10**9, b"", [(SLOT, slot)]),
         ]
         state = make_state(self.fork, accounts)
         message = make_message(self.fork, state, "call", static, gas, 5, b"\xaa" * 40, b"")
@@ -294,7 +303,20 @@ class Frame:
             "ethereum.forks." + fork.name + ".vm.runtime"
         ).get_valid_jump_destinations
         evm.valid_jump_destinations = jumpdests(code)
-        before = (list(evm.stack), bytearray(evm.memory), evm.gas_left, evm.output)
+        # A failed code may have warmed a slot or written one before it failed.
+        before = {
+            f.name: copy.copy(getattr(evm, f.name))
+            for f in dataclasses.fields(evm)
+            if isinstance(getattr(evm, f.name), (list, bytearray, set))
+        }
+        for field in ("gas_left", "output", "logs", "refund_counter", "return_data"):
+            if hasattr(evm, field):
+                before[field] = getattr(evm, field)
+        state = evm.message.block_env.state
+        scopes = [state]
+        if hasattr(fork.state, "TransientStorage"):
+            scopes.append(evm.message.tx_env.transient_storage)
+        fork.state.begin_transaction(*scopes)
         try:
             steps = 0
             while evm.running and int(evm.pc) < len(code) and steps < 100:
@@ -306,11 +328,15 @@ class Frame:
                 fork.ops.op_implementation[op](evm)
         except EthereumException as error:
             # The driver goes on from the frame before the failed code.
-            evm.stack, evm.memory, evm.gas_left, evm.output = before
+            fork.state.rollback_transaction(*scopes)
+            for field, value in before.items():
+                setattr(evm, field, value)
             evm.running = True
+            evm.error = None
             revert = getattr(fork.exceptions, "Revert", ())
             kind = "revert" if isinstance(error, revert) else "halt"
             return f"{kind} {type(error).__name__}"
+        fork.state.commit_transaction(*scopes)
         running = evm.running
         evm.running = True
         return " ".join(
@@ -348,6 +374,49 @@ def precompile(name, address, gas, data):
     except EthereumException as error:
         return f"halt {type(error).__name__}"
     return f"ok {int(evm.gas_left)} {tohex(evm.output)}"
+
+
+def opcodes(name):
+    ops = fork_of(name).ops.op_implementation
+    return ",".join(str(op.value) for op in sorted(ops, key=lambda o: o.value))
+
+
+def precompiles(name):
+    fork_of(name)
+    mapping = importlib.import_module(
+        "ethereum.forks." + name + ".vm.precompiled_contracts.mapping"
+    ).PRE_COMPILED_CONTRACTS
+    return ",".join(str(a) for a in sorted(int.from_bytes(a, "big") for a in mapping)) or "-"
+
+
+def byte_kinds(name):
+    """For each byte after seventeen pushes: `i` for no instruction, `o` for another end."""
+    frame = Frame(name, 10**9, False)
+    kinds = []
+    for byte in range(256):
+        frame.evm.stack = []
+        answer = frame.step(b"\x60\x00" * 17 + bytes([byte]))
+        kinds.append("i" if answer == "halt InvalidOpcode" else "o")
+    return "".join(kinds)
+
+
+def call_gas(name, value, gas, gas_left, memory, extra):
+    result = fork_of(name).gas.calculate_message_call_gas(
+        U256(int(value)), Uint(int(gas)), Uint(int(gas_left)), Uint(int(memory)), Uint(int(extra))
+    )
+    names = [f.name for f in dataclasses.fields(result)]
+    return " ".join(str(int(getattr(result, n))) for n in names)
+
+
+def sstore(name, original, current, new, warm, gas):
+    """SSTORE of `new` on a slot with an original and a current word, warm or cold."""
+    frame = Frame(name, int(gas), False, slot=int(original))
+    fork, evm = frame.fork, frame.evm
+    state = evm.message.block_env.state
+    fork.state.set_storage(state, Bytes20(TARGET), Bytes32(SLOT), U256(int(current)))
+    if warm == "1" and hasattr(evm, "accessed_storage_keys"):
+        evm.accessed_storage_keys.add((Bytes20(TARGET), Bytes32(SLOT)))
+    return frame.step(bytes([0x60, int(new), 0x60, 0x01, 0x55]))
 
 
 def header(fork, **fields):
@@ -431,6 +500,19 @@ def answer(words):
                     )
                 )
             )
+        case ["opcodes", name]:
+            return opcodes(name)
+        case ["precompiles", name]:
+            return precompiles(name)
+        case ["bytes", name]:
+            return byte_kinds(name)
+        case ["allbut64", *values]:
+            bound = fork_of("osaka").gas.max_message_call_gas
+            return ",".join(str(int(bound(Uint(int(v))))) for v in values)
+        case ["callgas", name, *rest]:
+            return call_gas(name, *rest)
+        case ["sstore", name, *rest]:
+            return sstore(name, *rest)
         case ["blobfee", name, parent_excess]:
             fork = fork_of(name)
             return str(int(fork.gas.calculate_blob_gas_price(U64(int(parent_excess)))))

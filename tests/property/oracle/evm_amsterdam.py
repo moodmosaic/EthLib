@@ -1,7 +1,7 @@
 """The reference of the EVM at Glamsterdam: the branch `forks/amsterdam` of EELS."""
 
-# No release has this fork, so the branch is installed apart from the released
-# package, at the commit that `requirements-evm.txt` names:
+# No release has this fork, so the branch is installed apart from the released package.
+# It is installed at the commit that `requirements-evm.txt` names:
 #
 #     .venv/bin/pip install --no-deps --target .venv/evm-amsterdam         git+https://github.com/ethereum/execution-specs@<commit>
 #
@@ -9,11 +9,17 @@
 #
 #     run <static> <gas> <reservoir> <value> <data> <code> <accounts>
 #     reads <the same>     Only the accounts that the frame read.
+#     gascosts <fork>      Each gas constant of the fork, as `NAME=value`.
+#     opcodes <fork>       The bytes of the instructions that the fork has.
+#     precompiles <fork>   The addresses of the precompiles that the fork has.
 #
-# It runs `process_call` on a frame from the caller to the target, and prints
-# what the frame left, in the form of `oracle/evm.py` with the state gas left
-# after the gas left.
+# The branch names its gas constants as EthLib does, at every fork.
+# It has BPO3 to BPO5, which no release has yet.
+#
+# It runs `process_call` on a frame from the caller to the target, and prints what the frame left.
+# The form is that of `oracle/evm.py` with the state gas left after the gas left.
 
+import importlib
 import os
 import sys
 
@@ -134,7 +140,7 @@ def run(static, gas, reservoir, value, data, code, accounts, raw=False):
         base_fee_per_gas=Uint(7),
         time=U256(1_700_000_000),
         prev_randao=Bytes32(b"\x11" * 32),
-        excess_blob_gas=U64(10 * 2**17),
+        excess_blob_gas=U64(60_000_000),
         parent_beacon_block_root=Bytes32(b"\x22" * 32),
         block_access_list_builder=BlockAccessListBuilder(),
         slot_number=U64(0),
@@ -229,6 +235,23 @@ def run(static, gas, reservoir, value, data, code, accounts, raw=False):
     return " ".join(words) + "\t" + error
 
 
+def gas_costs(name):
+    costs = importlib.import_module(f"ethereum.forks.{name}.vm.gas").GasCosts
+    return ",".join(f"{k}={int(v)}" for k, v in sorted(vars(costs).items()) if k.isupper())
+
+
+def opcodes(name):
+    ops = importlib.import_module(f"ethereum.forks.{name}.vm.instructions")
+    return ",".join(str(op.value) for op in sorted(ops.op_implementation, key=lambda o: o.value))
+
+
+def precompiles(name):
+    mapping = importlib.import_module(
+        f"ethereum.forks.{name}.vm.precompiled_contracts.mapping"
+    ).PRE_COMPILED_CONTRACTS
+    return ",".join(str(a) for a in sorted(int.from_bytes(a, "big") for a in mapping)) or "-"
+
+
 def main():
     sys.setrecursionlimit(20000)
     for line in sys.stdin:
@@ -240,6 +263,12 @@ def main():
                 # The account reads of the frame alone.
                 fields = run(*words[1:], raw=True).split("\t")[0].split(" ")
                 print(fields[8], flush=True)
+            elif words[0] == "gascosts":
+                print(gas_costs(words[1]), flush=True)
+            elif words[0] == "opcodes":
+                print(opcodes(words[1]), flush=True)
+            elif words[0] == "precompiles":
+                print(precompiles(words[1]), flush=True)
             else:
                 print("error unknown command", flush=True)
         except Exception as error:  # A crash of the reference is an answer.

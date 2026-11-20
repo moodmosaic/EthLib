@@ -1,4 +1,5 @@
 import Property.Evm.Program
+import Property.Evm.Trace
 
 /-!
 # One frame, stepped
@@ -28,12 +29,15 @@ def newFrame (fork : Fork) (gas : Nat) (static : Bool) : Evm fork Nat :=
 
 /-- Run code in a frame from its first byte, to its end or to a stop, in at most 100 steps.
 
+It gives the frame after the code and the opcodes that ran.
+
 An error leaves the frame as it was, so a sequence goes on after a refused instruction. -/
-def runCode {fork : Fork} (evm : Evm fork Nat) (code : ByteArray) :
-    Except EvmError (Evm fork Nat) :=
-  let rec go (fuel : Nat) (evm : Evm fork Nat) : Except EvmError (Evm fork Nat) :=
+def runTraced {fork : Fork} (evm : Evm fork Nat) (code : ByteArray) :
+    Except EvmError (Evm fork Nat × List UInt8) :=
+  let rec go (fuel : Nat) (evm : Evm fork Nat) (ran : List UInt8) :
+      Except EvmError (Evm fork Nat × List UInt8) :=
     match fuel with
-    | 0 => .ok evm
+    | 0 => .ok (evm, ran)
     | fuel + 1 =>
       if evm.running && evm.pc < code.size then
         match step fork evm with
@@ -41,11 +45,16 @@ def runCode {fork : Fork} (evm : Evm fork Nat) (code : ByteArray) :
           -- An instruction that keeps its reads gives its halt as a frame.
           match after.error with
           | some e => .error e
-          | none => go fuel after
+          | none => go fuel after (code[evm.pc]! :: ran)
         | .ok (.child ..) => .error (.unspecifiedOpcode 0)
         | .error e => .error e
-      else .ok evm
-  go 100 { evm with code, pc := 0, validJumpDestinations := validJumpDestinations code }
+      else .ok (evm, ran)
+  go 100 { evm with code, pc := 0, validJumpDestinations := validJumpDestinations code } []
+
+/-- Run code in a frame, as `runTraced` does, and give the frame only. -/
+def runCode {fork : Fork} (evm : Evm fork Nat) (code : ByteArray) :
+    Except EvmError (Evm fork Nat) :=
+  (·.1) <$> runTraced evm code
 
 /-! ## SLOAD and SSTORE against a model of the EIPs -/
 
@@ -162,11 +171,39 @@ def storageModel : Model StorageModel StorageStep where
 The model is the text of EIP-2200, EIP-2929 and EIP-3529, and of the Yellow Paper before them.
 
 After each step the gas left, the refund counter and the four words are the model's. -/
-def storageMachine : StateMachine StorageModel StorageStep (Σ fork, StorageSut fork) IO where
+def storageMachine (asked : Bool) :
+    StateMachine StorageModel StorageStep (Σ fork, StorageSut fork) IO where
   toModel := storageModel
   initSut m := pure ⟨m.fork, storageFrame m, false⟩
-  applySut sut _ _ t := do
+  applySut sut before after t := do
     let ⟨fork, sut⟩ := sut
+    label (if fork < .tangerineWhistle then "before Tangerine Whistle"
+      else if fork < .istanbul then "Tangerine Whistle to Petersburg"
+      else if fork < .berlin then "Istanbul and Muir Glacier"
+      else if fork < .london then "Berlin" else "London and later")
+    match t with
+    | .sload key =>
+      let slot := before.slots[key]!
+      label (if after.refused then "SLOAD out of gas"
+        else if fork < .berlin then "SLOAD" else if slot.warm then "SLOAD warm" else "SLOAD cold")
+    | .sstore key value =>
+      let slot := before.slots[key]!
+      let access := if fork < .berlin then "" else if slot.warm then ", warm" else ", cold"
+      if after.refused then
+        label (if fork ≥ .istanbul ∧ before.gas - 6 ≤ 2300 then "SSTORE refused at the stipend"
+          else "SSTORE out of gas")
+      else
+        label s!"{sstoreClass slot.original slot.current value}{access}"
+        -- The share is of the sequences in which a write of the class ran.
+        let least := if asked then 3 else 0
+        for kind in ["SSTORE leaves the word", "SSTORE sets a clean zero slot",
+            "SSTORE clears a clean slot", "SSTORE changes a clean slot",
+            "SSTORE resets a dirty slot to its zero", "SSTORE resets a dirty slot to its word",
+            "SSTORE writes a slot that was cleared", "SSTORE clears a dirty slot",
+            "SSTORE changes a dirty slot"] do
+          cover least kind (kind = sstoreClass slot.original slot.current value)
+      classify "the refund falls" (after.refund < before.refund)
+      classify "the refund rises" (after.refund > before.refund)
     let code : ByteArray := match t with
       | .sload key => ⟨#[0x60, UInt8.ofNat key, 0x54]⟩
       | .sstore key value => ⟨#[0x60, UInt8.ofNat value, 0x60, UInt8.ofNat key, 0x55]⟩
@@ -266,7 +303,8 @@ def DeepStep.code : DeepStep → ByteArray
 The model is a list and the two decoders of the EIP.
 
 An immediate byte that encodes nothing, a stack too short and a full stack refuse the step. -/
-def deepStackMachine : StateMachine DeepStack DeepStep (Evm .glamsterdam Nat × Bool) IO where
+def deepStackMachine (asked : Bool) :
+    StateMachine DeepStack DeepStep (Evm .glamsterdam Nat × Bool) IO where
   toModel := deepStackModel
   initSut m := do
     let frame := newFrame .glamsterdam m.gas false
@@ -275,7 +313,30 @@ def deepStackMachine : StateMachine DeepStack DeepStep (Evm .glamsterdam Nat × 
       | .ok next => next
       | .error _ => stack
     pure ({ frame with stack }, false)
-  applySut sut _ _ t := do
+  applySut sut before after t := do
+    let depth := before.stack.length
+    let refusal (needs : Option Nat) (pushes : Bool) : String :=
+      match needs with
+      | none => "refused: the immediate encodes nothing"
+      | some n => if n > depth then "refused: the stack is too short"
+        else if pushes ∧ depth = 1024 then "refused: the stack is full"
+        else if before.gas < 3 then "refused: out of gas" else "runs"
+    label (match t with
+      | .push _ => if after.refused then "PUSH refused" else "PUSH runs"
+      | .dupn x => s!"DUPN {refusal (decodeSingleModel x.toNat) true}"
+      | .swapn x => s!"SWAPN {refusal ((decodeSingleModel x.toNat).map (· + 1)) false}"
+      | .exchange x => s!"EXCHANGE {refusal ((decodePairModel x.toNat).map (·.2 + 1)) false}")
+    let reach : Option Nat := match t with
+      | .push _ => none
+      | .dupn x => decodeSingleModel x.toNat
+      | .swapn x => (decodeSingleModel x.toNat).map (· + 1)
+      | .exchange x => (decodePairModel x.toNat).map (·.2 + 1)
+    let least := if asked then 2 else 0
+    cover least "it reaches the deepest item" (reach = some depth)
+    cover least "it reaches one past the deepest item" (reach = some (depth + 1))
+    cover (5 * least) "DUPN runs" (!after.refused ∧ t matches .dupn _)
+    cover (5 * least) "SWAPN runs" (!after.refused ∧ t matches .swapn _)
+    cover (5 * least) "EXCHANGE runs" (!after.refused ∧ t matches .exchange _)
     match runCode sut.1 t.code with
     | .error e =>
       annotate s!"EthLib refuses with {reprStr e}"
@@ -289,40 +350,24 @@ def deepStackMachine : StateMachine DeepStack DeepStep (Evm .glamsterdam Nat × 
     sut.1.gas === m.gas
     sut.1.stack.val.map (·.toNat) === m.stack
 
-/-! ## A frame beside the reference, one family of instructions per command -/
+/-! ## A frame beside the reference, one kind of code per command -/
 
-/-- The state of a scenario: the frame of EthLib, once the first command started it. -/
-structure FrameState where
-  frame : Option (Σ fork, Evm fork Nat) := none
-  /-- The depth of the stack as a generator can tell it before any command runs.
+/-- The state of a scenario: the frame of EthLib.
 
-  `Command.next` moves it and `Command.buildIn` reads it.
+`Command.next` runs a command in it, so `Command.buildIn` sees the stack and the memory it meets. -/
+structure FrameState (fork : Fork) where
+  evm : Evm fork Nat
 
-  A command that the frame refuses leaves the stack as it was.
-
-  So this depth may be more than the true depth.
-
-  `check` has the last word. -/
-  depth : Nat := 0
-  deriving Inhabited
-
-/-- The frame of a state at a fork, or none before the first command. -/
-def FrameState.evm (s : FrameState) (fork : Fork) : Option (Evm fork Nat) :=
-  match s.frame with
-  | some ⟨held, evm⟩ => if h : held = fork then some (h ▸ evm) else none
-  | none => none
-
-/-- What commands are built from: the fork under its two names, and the oracle. -/
-structure FrameContext where
-  fork : Fork × String
+/-- What commands are built from: the name of the fork in the reference, and the oracle. -/
+structure FrameContext (fork : Fork) where
+  name : String
   oracle : Oracle
-  gas : Nat
-  /-- The share of sequences, in percent, in which a DUP or a SWAP must run.
+  /-- The opcodes that ran, over the sequences of the fork. -/
+  counts : IO.Ref OpCounts
+  /-- Whether the property requires the minimum share of each class.
 
-  A run of few sequences stays at small sizes, where sequences are short and the share is low.
-
-  So a short run asks for none. -/
-  minimum : Nat := 0
+  A run of few sequences stays at small sizes, where sequences are short and the shares low. -/
+  asked : Bool := false
 
 /-- What a frame shows after code ran, in the text form of the oracle. -/
 def showFrame {fork : Fork} (evm : Evm fork Nat) : String :=
@@ -333,123 +378,217 @@ def showFrame {fork : Fork} (evm : Evm fork Nat) : String :=
     toString evm.substate.refundCounter, showLogs evm.substate.logs,
     if evm.running then "1" else "0", hex evm.output]
 
+/-- The frame of a state after code, as far as EthLib tells: a refused code leaves it. -/
+def FrameState.after {fork : Fork} (s : FrameState fork) (code : ByteArray) : FrameState fork :=
+  match runCode s.evm code with
+  | .ok after => ⟨{ after with running := true }⟩
+  | .error _ => s
+
 /-- Run code in the frame of EthLib and in the frame of the reference, and compare what they show.
 
-The frames start on the first command.  A refused code leaves both frames as they were. -/
-def stepBoth (ctx : FrameContext) (code : ByteArray) (s : FrameState) : TestT IO FrameState := do
-  let evm ← match s.evm ctx.fork.1 with
-    | some evm => pure evm
-    | none => do
-      let _ ← ctx.oracle.ask ["frame", ctx.fork.2, toString ctx.gas, "0"]
-      pure (newFrame ctx.fork.1 ctx.gas false)
+A refused code leaves both frames as they were.
+
+`kind` names the command, for the shares of the report. -/
+def stepBoth {fork : Fork} (ctx : FrameContext fork) (kind : String) (code : ByteArray)
+    (s : FrameState fork) : TestT IO (FrameState fork) := do
   let answer ← ctx.oracle.ask ["op", hex code]
   annotate s!"code {hex code}: the reference says {answer}"
-  match runCode evm code with
+  match runTraced s.evm code with
   | .error e =>
     annotate s!"EthLib fails with {reprStr e}"
+    label s!"{kind} halts: {errorName e}"
     (if e == .revert then "revert" else "halt") === (answer.splitOn " ").head!
-    pure { s with frame := some ⟨_, evm⟩ }
-  | .ok after =>
+    pure s
+  | .ok (after, ran) =>
+    label s!"{kind} runs"
+    let trace : Trace := ran.foldl (init := {}) fun trace byte =>
+      { trace with ran := trace.ran.modify byte.toNat (· + 1) }
+    evalIO (ctx.counts.modify (·.add fork.name trace))
     showFrame after === answer
-    pure { s with frame := some ⟨_, { after with running := true }⟩ }
+    pure ⟨{ after with running := true }⟩
+
+/-- A snippet of the whole programs, which leaves the stack as it found it.
+
+Its writes to memory, to storage and to the logs stay for the commands after it. -/
+structure Snippet (fork : Fork) where
+  snip : Snip
+
+instance {fork : Fork} : Command (Snippet fork) (FrameState fork) (FrameContext fork) IO where
+  apply ctx c s := stepBoth ctx "a snippet" (assemble [c.snip]) s
+  label c := reprStr c.snip
+  build _ := Snippet.mk <$> Gen.frequency ([(50, genOp fork), (20, genNullary fork),
+    (33, genPush fork), (16, genDup), (16, genSwap), (3, genSkip), (4, genSkipIf), (3, genLoop),
+    (6, genSlot fork)] ++
+    -- RETURNDATACOPY of no byte: a stepped frame runs no call, so its return data is empty.
+    if hasOp fork 0x3e then
+      [(3, pure (Snip.ofBytes "RETURNDATACOPY of no byte" [0x60, 0, 0x60, 0, 0x60, 0, 0x3e]))]
+    else [])
+  next _ c s := s.after (assemble [c.snip])
+
+/-- An instruction after pushes of its operands, whose result stays on the stack. -/
+structure Operate (fork : Fork) where
+  byte : UInt8
+  args : List Nat
 
 /-- The code of an instruction after pushes of its operands. -/
-def opCode (byte : UInt8) (args : List Nat) : ByteArray :=
-  ⟨(args.reverse.flatMap pushBytes ++ [byte]).toArray⟩
+def opCode (byte : UInt8) (args : List Nat) : ByteArray := ⟨(pushes args ++ [byte]).toArray⟩
 
-/-- A command: its family, and the code it runs. -/
-structure FrameCommand (family : String) where
-  ctx : FrameContext
-  name : String
-  code : ByteArray
+instance {fork : Fork} : Command (Operate fork) (FrameState fork) (FrameContext fork) IO where
+  apply ctx c s := stepBoth ctx "an instruction that leaves its result" (opCode c.byte c.args) s
+  label c := s!"{opName c.byte} {c.args.map hexNat}"
+  build _ := do
+    let table := (instructions ++ nullary.map (·, [])).filter fun (byte, _) =>
+      hasOp fork byte && pushesWord byte
+    let (byte, kinds) ← Gen.element table
+    Operate.mk byte <$> genArgs kinds
+  next _ c s := s.after (opCode c.byte c.args)
 
-/-- A command of a family, from the instructions of that family that the fork may have. -/
-def buildFrameCommand (family : String) (bytes : List UInt8) (ctx : FrameContext) :
-    Gen (FrameCommand family) := do
-  let table := instructions ++ nullary.map fun byte => (byte, [])
-  let (byte, kinds) ← Gen.element (table.filter fun (byte, _) => bytes.contains byte)
-  let args ← Gen.sequence (kinds.map genOperand)
-  pure ⟨ctx, s!"{family} {hexNat byte.toNat} {args.map hexNat}", opCode byte args⟩
-
-/-- The families of instructions, each a type of command. -/
-def families : List (String × List UInt8) := [
-  ("ARITHMETIC", [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b]),
-  ("BITWISE", [0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d,
-    0x1e]),
-  ("MEMORY", [0x20, 0x35, 0x37, 0x39, 0x3e, 0x51, 0x52, 0x53, 0x59, 0x5e]),
-  ("STORAGE", [0x54, 0x55, 0x5c, 0x5d]),
-  ("ENVIRONMENT", nullary ++ [0x31, 0x3b, 0x3c, 0x3f, 0x40, 0x49]),
-  ("LOG", [0xa0, 0xa1, 0xa2, 0xa3, 0xa4]),
-  ("STACK", [0x50]),
-  ("END", [0xf3, 0xfd])]
-
-/-- The bytes of a family. -/
-def familyBytes (family : String) : List UInt8 :=
-  ((families.find? fun (name, _) => name = family).map (·.2)).getD []
-
-/-- The instructions that leave one word more than their operands took: the others leave none.
-
-A command pushes the operands of its instruction itself, so this is what it adds to the stack. -/
-def leavesWord (byte : UInt8) : Bool :=
-  (familyBytes "ARITHMETIC" ++ familyBytes "BITWISE" ++ familyBytes "ENVIRONMENT" ++
-    [0x20, 0x35, 0x51, 0x59, 0x54, 0x5c]).contains byte
-
-instance {family : String} : Command (FrameCommand family) FrameState FrameContext IO where
-  apply _ c s := stepBoth c.ctx c.code s
-  label c := s!"{c.name} [{hex c.code}]"
-  build ctx := buildFrameCommand family (familyBytes family) ctx
-  next _ c s :=
-    let byte := c.code.data.back?.getD 0
-    if leavesWord byte then { s with depth := s.depth + 1 } else s
-
-/-- DUP and SWAP, which need a stack: the command is skipped on one that is too short. -/
-structure StackCommand where
-  ctx : FrameContext
+/-- DUP, SWAP or POP on the words that the stack holds. -/
+structure StackCommand (fork : Fork) where
   byte : UInt8
 
-instance : Command StackCommand FrameState FrameContext IO where
-  check _ c s :=
-    let depth := (s.frame.map (·.2.stack.val.length)).getD 0
-    let n := c.byte.toNat % 16
-    -- One command in the family reaches one past the stack, to see the underflow.
-    if c.byte ≥ 0x90 then n + 1 ≤ depth else n ≤ depth
-  apply _ c s := do
-    cover c.ctx.minimum "a DUP or SWAP ran" true
-    stepBoth c.ctx ⟨#[c.byte]⟩ s
-  label c := s!"{if c.byte ≥ 0x90 then "SWAP" else "DUP"}{c.byte.toNat % 16 + 1}"
-  build ctx := StackCommand.mk ctx <$> Gen.integral (.constant 0x80 0x9f)
-  next _ c s := if c.byte ≥ 0x90 then s else { s with depth := s.depth + 1 }
-  -- Mostly an instruction that the stack can serve.
-  --
-  -- That is DUP1 to DUP of the depth, and SWAP1 to SWAP of one less.
-  --
-  -- The blind draw stays, for the reach of one past the stack.
-  buildIn ctx s :=
-    let blind := StackCommand.mk ctx <$> Gen.integral (.constant 0x80 0x9f)
-    let dup := (fun n => StackCommand.mk ctx (0x80 + UInt8.ofNat n)) <$>
-      Gen.nat (.constant 0 (min s.depth 16 - 1))
-    let swap := (fun n => StackCommand.mk ctx (0x90 + UInt8.ofNat n)) <$>
-      Gen.nat (.constant 0 (min (s.depth - 1) 16 - 1))
-    if s.depth = 0 then blind
-    else if s.depth = 1 then Gen.frequency [(4, dup), (1, blind)]
-    else Gen.frequency [(3, dup), (3, swap), (1, blind)]
+/-- The words that DUP, SWAP or POP needs on the stack. -/
+def stackNeeds (byte : UInt8) : Nat :=
+  if byte = 0x50 then 1 else if byte ≥ 0x90 then byte.toNat - 0x8e else byte.toNat - 0x7f
 
-/-- A frame steps in EthLib as it steps in the reference, over any sequence of instructions.
+instance {fork : Fork} : Command (StackCommand fork) (FrameState fork) (FrameContext fork) IO where
+  -- An instruction may reach one word past the stack, to see the underflow.
+  check _ c s := stackNeeds c.byte ≤ s.evm.stack.val.length + 1
+  apply ctx c s := do
+    let fits := stackNeeds c.byte ≤ s.evm.stack.val.length
+    let least := if ctx.asked then 3 else 0
+    cover (3 * least) "DUP on the stack it meets" (fits ∧ c.byte ≥ 0x80 ∧ c.byte < 0x90)
+    cover (3 * least) "SWAP on the stack it meets" (fits ∧ c.byte ≥ 0x90)
+    cover least "POP on the stack it meets" (fits ∧ c.byte = 0x50)
+    classify "DUP9 to DUP16 on the stack it meets" (fits ∧ c.byte ≥ 0x88 ∧ c.byte < 0x90)
+    classify "SWAP9 to SWAP16 on the stack it meets" (fits ∧ c.byte ≥ 0x98)
+    stepBoth ctx (if c.byte = 0x50 then "POP" else if c.byte ≥ 0x90 then "SWAP" else "DUP")
+      ⟨#[c.byte]⟩ s
+  label c := opName c.byte
+  build _ := StackCommand.mk <$> Gen.integral (.constant 0x80 0x9f)
+  next _ c s := s.after ⟨#[c.byte]⟩
+  -- Mostly an instruction that the stack can serve, and now and then one that reaches one past it.
+  buildIn _ s :=
+    let depth := s.evm.stack.val.length
+    let dup (most : Nat) := (fun n => StackCommand.mk (UInt8.ofNat (0x7f + n))) <$>
+      Gen.nat (.constant 1 most)
+    let swap (most : Nat) := (fun n => StackCommand.mk (UInt8.ofNat (0x8f + n))) <$>
+      Gen.nat (.constant 1 most)
+    let past := Gen.element ((if depth < 16 then [StackCommand.mk (UInt8.ofNat (0x80 + depth))]
+      else []) ++ (if depth < 17 ∧ depth ≥ 1 then [StackCommand.mk (UInt8.ofNat (0x8f + depth))]
+      else []) ++ [StackCommand.mk (if depth = 0 then 0x50 else 0x80)])
+    if depth = 0 then past
+    else if depth = 1 then Gen.frequency [(6, dup 1), (1, pure ⟨0x50⟩), (1, past)]
+    else Gen.frequency [(5, dup (min depth 16)), (5, swap (min (depth - 1) 16)), (1, pure ⟨0x50⟩),
+      (1, past)]
+
+/-- An instruction on the words that the stack holds, with no push of its own.
+
+So the results of the commands before it are its operands. -/
+structure Consume (fork : Fork) where
+  byte : UInt8
+
+/-- The instructions that compute a word from words, with the number they take. -/
+def pureOps : List (UInt8 × Nat) :=
+  instructions.filterMap fun (byte, kinds) =>
+    if byte.toNat ≤ 0x1e then some (byte, kinds.length) else none
+
+instance {fork : Fork} : Command (Consume fork) (FrameState fork) (FrameContext fork) IO where
+  check _ c s := ((pureOps.lookup c.byte).getD 4) ≤ s.evm.stack.val.length
+  apply ctx c s := do
+    cover (if ctx.asked then 5 else 0) "an instruction on the words of the stack" true
+    stepBoth ctx "an instruction on the stack" ⟨#[c.byte]⟩ s
+  label c := s!"{opName c.byte} on the stack"
+  build _ :=
+    Consume.mk <$> Gen.element ((pureOps.filter fun (byte, _) => hasOp fork byte).map (·.1))
+  next _ c s := s.after ⟨#[c.byte]⟩
+  buildIn _ s := Consume.mk <$> Gen.element (((pureOps.filter fun (byte, needs) =>
+    hasOp fork byte && needs ≤ max 1 s.evm.stack.val.length).map (·.1)))
+
+/-- An instruction on a range of memory that ends around the size of the memory it meets.
+
+A range that ends at the size costs no growth, and one byte more costs a word. -/
+structure MemoryEdge (fork : Fork) where
+  byte : UInt8
+  args : List Nat
+  /-- Where the range ends, less the size of the memory. -/
+  past : Int
+
+instance {fork : Fork} : Command (MemoryEdge fork) (FrameState fork) (FrameContext fork) IO where
+  apply ctx c s := do
+    let least := if ctx.asked then 3 else 0
+    cover least "a range that ends at the size of the memory" (c.past = 0)
+    cover least "a range that ends one byte past the memory" (c.past = 1)
+    cover least "a range that ends inside the memory" (c.past < 0)
+    stepBoth ctx "an instruction at the edge of the memory" (opCode c.byte c.args) s
+  label c := s!"{opName c.byte} {c.args.map hexNat} (the range ends {c.past} past the memory)"
+  build _ := pure ⟨0x51, [0], 32⟩
+  next _ c s := s.after (opCode c.byte c.args)
+  buildIn _ s := do
+    let size := s.evm.memory.size
+    let past ← Gen.element [(0 : Int), 1, -1, -32, 31, 32, 33]
+    let stop := ((size : Int) + past).toNat
+    let length ← Gen.element ([1, 32, 33].filter (· ≤ stop) ++ [stop])
+    let start := stop - length
+    let word ← genWord
+    -- Each instruction with its range from `start` to `stop`: a word or a byte for the fixed ones.
+    let choices : List (UInt8 × List Nat × Nat) := [
+      (0x51, [stop - 32], 32), (0x52, [stop - 32, word], 32), (0x53, [stop - 1, word], 1),
+      (0x20, [start, length], length), (0x37, [start, 0, length], length),
+      (0x39, [start, 0, length], length), (0xa0, [start, length], length),
+      (0xa1, [start, length, word], length), (0x5e, [start, 0, length], length),
+      (0x5e, [0, start, length], length), (0xf3, [start, length], length),
+      (0xfd, [start, length], length)]
+    let fit := choices.filter fun (byte, _, needs) => hasOp fork byte && needs ≤ stop
+    match fit with
+    | [] => pure ⟨0x51, [0], (32 : Int) - size⟩
+    | first :: rest =>
+      let (byte, args, _) ← Gen.element (first :: rest)
+      pure ⟨byte, args, past⟩
+
+/-- A snippet that halts the frame, which both sides refuse and undo. -/
+structure Spoil (fork : Fork) where
+  snip : Snip
+
+instance {fork : Fork} : Command (Spoil fork) (FrameState fork) (FrameContext fork) IO where
+  apply ctx c s := stepBoth ctx "a spoiler" (assemble [c.snip]) s
+  label c := reprStr c.snip
+  build _ := Spoil.mk <$> Gen.frequency ([(3, genInvalid fork), (3, genUnderflow fork false),
+    (3, genBadJump), (3, genHugeMemory fork false), (2, genEnding fork),
+    (1, pure (Snip.ofBytes "STOP" [0x00]))] ++
+    if hasOp fork 0x3e then [(2, genBadReturnData)] else [])
+  next _ c s := s.after (assemble [c.snip])
+
+/-- The frame at the start of a scenario: mostly with gas for every command, now and then static.
+
+A static frame exists from Byzantium. -/
+def genFrameStart (fork : Fork) : Gen (Nat × Bool) :=
+  Gen.zip (Gen.frequency [(6, pure 3000000), (1, Gen.nat (.linear 0 100000))])
+    (if fork ≥ .byzantium then Gen.frequency [(7, pure false), (1, pure true)] else pure false)
+
+/-- A frame steps in EthLib as it steps in the reference, over any sequence of commands.
 
 After each command the gas left, the program counter and the memory are the reference's.
 
 So are the whole stack, the refund, the logs and the output.
 
-A sequence carries the memory, the warm slots and the storage from one instruction to the next.
+A sequence carries the memory, the stack, the warm slots and the storage from one to the next.
 
 One instruction alone does not show that. -/
-def frameScenario (mode : Mode) (ctx : FrameContext) : Property IO :=
-  scenario mode ctx [
-    Command.gen (FrameCommand "ARITHMETIC"), Command.gen (FrameCommand "BITWISE"),
-    Command.gen (FrameCommand "MEMORY"), Command.gen (FrameCommand "STORAGE"),
-    Command.gen (FrameCommand "ENVIRONMENT"), Command.gen (FrameCommand "LOG"),
-    Command.gen (FrameCommand "STACK"), Command.gen StackCommand,
-    Command.gen (FrameCommand "MEMORY"), Command.gen (FrameCommand "STORAGE"),
-    Command.gen (FrameCommand "END")]
+def frameScenario (mode : Mode) (fork : Fork) (ctx : FrameContext fork)
+    (range : Range Nat := .linear 1 40) : Property IO :=
+  scenarioFrom ((fun (gas, static) => FrameState.mk (newFrame fork gas static)) <$>
+      genFrameStart fork) mode ctx
+    [Command.gen (Snippet fork), Command.gen (Snippet fork), Command.gen (Snippet fork),
+      Command.gen (Operate fork), Command.gen (Operate fork), Command.gen (Operate fork),
+      Command.gen (StackCommand fork), Command.gen (StackCommand fork),
+      Command.gen (StackCommand fork), Command.gen (Consume fork), Command.gen (MemoryEdge fork),
+      Command.gen (MemoryEdge fork), Command.gen (Spoil fork)]
+    range fun s => do
+      let static := s.evm.message.isStatic
+      let _ ← ctx.oracle.ask ["frame", ctx.name, toString s.evm.gas, if static then "1" else "0"]
+      label (if static then "a static frame" else "a frame that may write")
+      label (if s.evm.gas < 3000000 then "a frame with little gas" else "a frame with ample gas")
+      pure s
 
 end EvmProperty
