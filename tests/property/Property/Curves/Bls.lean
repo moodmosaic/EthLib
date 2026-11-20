@@ -58,10 +58,9 @@ def fields : Property IO := pureIO do
   (x / y).val === a % r * modPow r b (r - 2) % r
   beNat x.toBytesBE === a % r
   x.toBytesBE.size === 32
-  -- The decoder takes exactly 32 bytes of a number below `r`.
-  (Fr.fromBytesBE (beBytes 32 a)).toOption.map (·.val) === (if a < r then some a else none)
-  (Fr.fromBytesBE (beBytes 31 (a % 2 ^ 248))).toOption.map (·.val) === none
-  (Fr.fromBytesBE (beBytes 33 a)).toOption.map (·.val) === none
+  -- The decoder takes 32 bytes, by its type, and only those of a number below `r`.
+  let word : Vector UInt8 32 := Vector.ofFn fun i => (beBytes 32 a)[i.val]!
+  (Fr.fromBytesBE word).toOption.map (·.val) === (if a < r then some a else none)
   let (c, d) ← forAll (Gen.zip (genNear p 384) (genNear p 384))
   let (u, v) := (Fp.ofNat c, Fp.ofNat d)
   classify "Fp: 48 bytes of a number below p, decoded" (c < p)
