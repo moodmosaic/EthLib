@@ -1,0 +1,14 @@
+# The references of oracle/rpc.py and oracle/rpc_*.py, beside oracle/requirements.txt.
+# They are those of the earlier drivers: see oracle/requirements-evm.txt for EELS.
+#     .venv/bin/pip install --no-deps ethereum-execution==2.20.0
+ethereum-execution==2.20.0
+ethereum-types==0.4.1
+ethereum-rlp==0.1.7
+# Signatures, RLP, tries, Bloom filters, Snappy and SSZ.
+coincurve==21.0.0
+rlp==5.0.0
+trie==4.0.0
+eth-bloom==4.0.0
+cramjam==2.14.0
+eth-remerkleable==0.1.31
+pycryptodome==4.5.0
