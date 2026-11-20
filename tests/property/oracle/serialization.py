@@ -7,6 +7,7 @@
 #     sszdec <type> <hex>      The bytes written back and the root, or error.
 #     ssznode <type> <value> <gindex>   The node at a generalized index, or error.
 #     sszgindex <type> <path>  The generalized index of a path.
+#     sszposition <type> <step>   The chunk and the bytes of an element, and the chunk count.
 #     sszcompat <type> <type>  Whether the two can be options of one CompatibleUnion.
 #     sszbounds <type>         The fewest and the most bytes of an encoding.
 #     ssztype <type>           Whether the specification lets the declaration name a type.
@@ -15,6 +16,7 @@
 #     spechelpers <indices>    get_helper_indices of the specification.
 #     specroot <leaves> <proof> <indices> The root of a proof or of a multiproof.
 #     sszdef <type>            The bytes and the root of the default value.
+#     ssziszero <type> <value> Whether a value is the default of its type.
 #     branchroot <leaf> <branch> <depth> <index>   The root a branch climbs to.
 #     helpers <indices>        get_helper_indices of consensus-specs.
 #     multiroot <leaves> <proof> <indices>   calculate_multi_merkle_root.
@@ -26,16 +28,23 @@
 #     jsonint <hex of text>    The integer that a JSON number is, or error.
 #     rpc <kind> <hex of text> Whether the text matches the pattern of base-types.yaml.
 #     e2s <hex>                The records of an e2store file, by a model.
+#     modelnode <hash> <type> <value> <gindex>   A node of the tree model, under a hash.
+#
+# `serialization_params.py` holds the commands of the general functions.
 #
 # An item or a value or a type is JSON.  Bytes are hexadecimal, `-` for none.
 
-import hashlib
 import json
+import os
 import re
 import struct
 import sys
 
-import ssz as spec
+# The interpreter runs isolated (-I), so the directory of the script is added by hand.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import serialization_params as params  # noqa: E402
+import ssz as spec  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from remerkleable.basic import boolean, uint8, uint16, uint32, uint64, uint128, uint256
 from remerkleable.bitfields import Bitlist, Bitvector
@@ -47,10 +56,14 @@ from remerkleable.progressive import (
     ProgressiveContainer,
     ProgressiveList,
 )
+from ssz import paths as spec_paths  # noqa: E402
 
 import rlp
 
 UINTS = {1: uint8, 2: uint16, 4: uint32, 8: uint64, 16: uint128, 32: uint256}
+
+# A scalar of RLP has no bound, and one of 65535 bytes has more digits than Python prints.
+sys.set_int_max_str_digits(0)
 
 
 def unhex(word):
@@ -124,6 +137,9 @@ def rlpdec(data):
 def rlpint(data):
     try:
         item = rlp.decode(data, strict=True)
+        # The sedes takes the empty list for 0: a scalar is a byte string (Yellow Paper, B).
+        if not isinstance(item, bytes):
+            return "error"
         return str(rlp.sedes.big_endian_int.deserialize(item))
     except (rlp.exceptions.RLPException, TypeError):
         return "error"
@@ -190,6 +206,9 @@ def ssz_value(t, v):
             return typ(bytes.fromhex(v))
         case ["bitvec", _] | ["bitlist", _] | ["pbitlist"]:
             return typ([bool(b) for b in v])
+        case ["vec", elem, n] if len(v) != n:
+            # The first reference takes no elements for the default vector: a vector has its count.
+            raise ValueError(f"a vector of {n} elements, given {len(v)}")
         case ["vec", elem, _] | ["list", elem, _] | ["plist", elem]:
             return typ([ssz_value(elem, x) for x in v])
         case ["cont", names, fields] | ["pcont", _, names, fields]:
@@ -373,8 +392,9 @@ def spec_path(t, path):
     return out
 
 
-# A tree written from the text of the specification, to answer for nodes that the
-# reference keeps collapsed.  A leaf is a chunk, or a value with a tree of its own.
+# A tree written from the text of the specification.
+# It answers for nodes that the reference keeps collapsed.
+# A leaf is a chunk, or a value with a tree of its own.
 
 ZERO = b"\0" * 32
 
@@ -549,6 +569,14 @@ def sszdef(t):
     return first if first == second else f"references differ {first} {second}"
 
 
+def ssziszero(t, v):
+    """is_zero of the specification, or the fault of a type that has no default."""
+    try:
+        return "true" if spec_value(t, v).is_zero() else "false"
+    except spec.SSZError as e:
+        return f"error {e.fault.name}"
+
+
 def spechelpers(indices):
     try:
         return " ".join(map(str, spec.get_helper_indices(indices))) or "-"
@@ -681,6 +709,22 @@ def sszgindex(t, path):
     return cited
 
 
+def sszposition(t, step):
+    """chunk_position, chunk_count and item_length of the specification, or their faults."""
+    typ = spec_type(t)
+
+    def ask(question):
+        try:
+            return question()
+        except spec.SSZError as e:
+            return f"error {e.fault.name}"
+
+    word = spec_path(t, [step])[0]
+    position = ask(lambda: "{} {} {}".format(*spec_paths.chunk_position(typ, word)))
+    count = ask(lambda: str(spec_paths.chunk_count(typ)))
+    return f"{position} | {count} | {spec_paths.item_length(typ)}"
+
+
 def sszcompat(a, b):
     try:
         CompatibleUnion({1: ssz_type(a), 2: ssz_type(b)})
@@ -717,8 +761,23 @@ def get_helper_indices(indices):
     return sorted(all_helper_indices.difference(all_path_indices), reverse=True)
 
 
+# The hash of the tree model: SHA-256, unless a command names another.
+HASH = [params.HASHES["sha256"]]
+
+
 def sha(a, b):
-    return hashlib.sha256(a + b).digest()
+    return HASH[0](a + b)
+
+
+def modelnode(name, t, v, gindex):
+    """A node of the tree model with another hash in the place of SHA-256."""
+    HASH[0] = params.HASHES[name]
+    try:
+        return tree_node(t, v, [int(b) for b in bin(gindex)[3:]]).hex()
+    except LookupError as e:
+        return f"error model {e}"
+    finally:
+        HASH[0] = params.HASHES["sha256"]
 
 
 def calculate_multi_merkle_root(leaves, proof, indices):
@@ -923,8 +982,8 @@ def rpc(kind, text):
         return "error"
     if kind.startswith("uint"):
         return str(int(chars, 16))
-    # The pattern of `bytes` admits an odd count of digits, which spells no bytes:
-    # two digits make a byte, as the "hex encoded bytes" of the schema say.
+    # The pattern of `bytes` admits an odd count of digits, which spells no bytes.
+    # Two digits make a byte, as the "hex encoded bytes" of the schema say.
     if len(chars) % 2:
         return "error"
     return tohex(bytes.fromhex(chars[2:]))
@@ -974,6 +1033,8 @@ def answer(words):
             return sszbounds(json.loads(t))
         case ["sszdef", t]:
             return sszdef(json.loads(t))
+        case ["ssziszero", t, v]:
+            return ssziszero(json.loads(t), json.loads(v))
         case ["branchroot", leaf, branch, depth, index]:
             value = unhex(leaf)
             for i, node in enumerate(chunks_of(branch)[: int(depth)]):
@@ -983,6 +1044,8 @@ def answer(words):
             return ssznode(json.loads(t), json.loads(v), int(gindex))
         case ["sszgindex", t, path]:
             return sszgindex(json.loads(t), json.loads(path))
+        case ["sszposition", t, step]:
+            return sszposition(json.loads(t), json.loads(step))
         case ["sszcompat", a, b]:
             return sszcompat(json.loads(a), json.loads(b))
         case ["helpers", indices]:
@@ -1011,6 +1074,10 @@ def answer(words):
             return rpc(kind, unhex(text))
         case ["e2s", data]:
             return e2s(unhex(data))
+        case ["modelnode", name, t, v, gindex]:
+            return modelnode(name, json.loads(t), json.loads(v), int(gindex))
+    if words[0] in params.HANDLERS:
+        return params.HANDLERS[words[0]](*words[1:])
     return "error unknown command"
 
 

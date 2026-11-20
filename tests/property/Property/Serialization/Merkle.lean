@@ -1,6 +1,7 @@
 import Hedgehog
 import Support
 import Property.Serialization.Common
+import Property.Serialization.Classes
 
 /-!
 # SSZ trees: nodes, generalized indices, proofs, and the rules of a declaration
@@ -26,7 +27,7 @@ open Ssz in
 partial def genPath (shape : Desc) : Gen (List PathStep) :=
   let next (child : Desc) (step : PathStep) : Gen (List PathStep) := (step :: ·) <$> genPath child
   let word (step : PathStep) : Gen (List PathStep) :=
-    Gen.frequency [(9, pure [step]), (1, pure [step, .position 0])]
+    Gen.frequency [(4, pure [step]), (1, pure [step, .position 0])]
   let stray : Gen (List PathStep) :=
     (fun step => [step]) <$> Gen.element [.length, .activeFields, .selector, .position 0]
   let element (child : Desc) (count : Option Nat) : Gen (List PathStep) := do
@@ -36,17 +37,17 @@ partial def genPath (shape : Desc) : Gen (List PathStep) :=
       (1, Gen.element [0, 31, 32, 255, 256, 257])]
     next child (.position index)
   let fields (children : List Desc) : Gen (List PathStep) := do
-    let index ← Gen.frequency [(9, Gen.nat (.constant 0 (children.length - 1))),
+    let index ← Gen.frequency [(6, Gen.nat (.constant 0 (children.length - 1))),
       (1, pure children.length)]
     next (children.getD index .bool) (.position index)
   let steps : List (Nat × Gen (List PathStep)) :=
     match shape with
     | .bool | .uint _ => [(1, stray)]
     | .byteVector length => [(6, element (.uint 1) (some length))]
-    | .byteList limit => [(4, element (.uint 1) (some limit)), (2, word .length)]
+    | .byteList limit => [(3, element (.uint 1) (some limit)), (3, word .length)]
     | .bitVector length => [(6, element .bool (some length))]
-    | .bitList limit => [(4, element .bool (some limit)), (2, word .length)]
-    | .progressiveBitList _ => [(4, element .bool none), (2, word .length)]
+    | .bitList limit => [(3, element .bool (some limit)), (3, word .length)]
+    | .progressiveBitList _ => [(3, element .bool none), (3, word .length)]
     | .vector child length => [(6, element child (some length))]
     | .list child limit => [(4, element child (some limit)), (2, word .length)]
     | .progressiveList child _ => [(4, element child none), (2, word .length)]
@@ -56,15 +57,55 @@ partial def genPath (shape : Desc) : Gen (List PathStep) :=
         (4, do
           let slot ← Gen.nat (.constant 0 (options.length - 1))
           next (options.getD slot .bool) (.position (selectors.getD slot 0))),
-        (1, pure [.position 0]),
-        (2, word .selector)]
-  Gen.frequency ((2, pure []) :: (1, stray) :: steps)
+        (2, (fun other => [.position other]) <$> Gen.element [0, 4, 128]),
+        (3, word .selector)]
+  Gen.frequency ((1, pure []) :: (1, stray) :: steps)
+
+/-- The reasons for which a path has no generalized index. -/
+def pathReasons : List String :=
+  ["NO_PARTS", "NO_PARTS_MIXIN", "NO_MIXIN", "NO_SUCH_FIELD", "NO_SUCH_OPTION",
+    "NO_SUCH_POSITION"]
+
+open Ssz in
+/-- What each step of a path leaves, while the path holds: a type, or the word of one. -/
+partial def pathKinds (shape : Desc) : List PathStep → List String
+  | [] => []
+  | step :: rest =>
+    let here := match step with
+      | .position _ => s!"an element of {constructorOf shape}"
+      | _ => s!"the word of {constructorOf shape}"
+    match shape.resolveStep step with
+    | .ok (_, some child) => here :: pathKinds child rest
+    | .ok (_, none) => [here]
+    | .error _ => []
+
+/-- The steps that a path can take. -/
+def pathUniverse : List String :=
+  (constructors.drop 2).map ("an element of " ++ ·) ++
+  ["List", "ByteList", "Bitlist", "ProgressiveList", "ProgressiveBitlist",
+    "ProgressiveContainer", "CompatibleUnion"].map ("the word of " ++ ·)
+
+open Ssz in
+/-- A type with bytes or bits at its root or one step under it, where a path reaches them. -/
+def genShallow : Gen Desc := do
+  let leaf ← Gen.frequency [
+    (2, Desc.byteVector <$> genEdge [1, 31, 32, 33, 64, 65] (.linear 1 70)),
+    (2, Desc.byteList <$> genEdge [0, 1, 31, 32, 33, 64, 65] (.linear 0 70)),
+    (2, Desc.bitVector <$> genEdge [1, 255, 256, 257, 513] (.linear 1 520)),
+    (2, Desc.bitList <$> genEdge [0, 1, 255, 256, 257, 513] (.linear 0 520)),
+    (2, pure (.progressiveBitList none)),
+    (3, (fun basic => Desc.compatibleUnion [1, 2] [basic, basic]) <$> genBasic)]
+  Gen.element [leaf, leaf, .container ["a", "b"] [.uint 8, leaf], .list leaf 3, .vector leaf 2,
+    .progressiveContainer [true, false, true] ["a", "b"] [leaf, .bool]]
 
 /-- The generalized index of a path is the one of the specification. -/
 def gindexOfPath (oracle : Oracle) : Property IO := propertyM do
-  let shape ← forAllWith typeText genDesc
+  let shape ← forAllWith typeText (Gen.frequency [(1, genDesc), (1, genShallow)])
   let path ← forAllWith pathText (genPath shape)
   pure do
+    labelOutcome pathReasons (Ssz.getGeneralizedIndex shape path)
+    classifyOne "steps" (countClasses 4) (countClass 4 path.length)
+    classifyAny "step" pathUniverse (pathKinds shape path)
     let expected ← oracle.ask ["sszgindex", typeText shape, pathText path]
     match Ssz.getGeneralizedIndex shape path with
     | .ok index => toString index === expected
@@ -82,13 +123,25 @@ def genGindex (shape : Ssz.Desc) : Gen Nat := do
     (1, pure (base ^^^ 1)),
     (1, pure (2 * base)),
     (1, pure (2 * base + 1)),
-    (2, Gen.nat (.exponential 1 4096))]
+    (2, Gen.nat (.exponential 1 4096)),
+    -- Far down the left edge, where a tree under a great limit keeps its few nodes.
+    (1, (fun depth low => 2 ^ depth + low) <$> Gen.element [17, 40, 62, 63, 64, 65, 66, 70] <*>
+      Gen.nat (.constant 0 3)),
+    (1, (fun depth low => 2 * 2 ^ depth + low) <$> Gen.element [17, 40, 62, 63, 64, 65, 66, 70]
+      <*> Gen.nat (.constant 0 3))]
+
+/-- An index at which a value has a node below its root, if one of a few draws finds one. -/
+def genNodeIndex (shape : Ssz.Desc) (value : Ssz.Value) : Gen Nat := do
+  let candidates ← Gen.list (.singleton 8) (genGindex shape)
+  pure ((candidates.find? fun index =>
+    index > 1 && (Ssz.nodeRoot shape value index).toOption.isSome).getD (candidates.headD 1))
 
 /-- The node at a generalized index of the tree of a value is the node of the reference. -/
 def nodeAtGindex (oracle : Oracle) : Property IO := propertyM do
   let (shape, value) ← forAllWith typedText genTyped
   let index ← forAll (genGindex shape)
   pure do
+    labelNode shape value index
     let expected ← oracle.ask ["ssznode", typeText shape, valueText value, toString index]
     match Ssz.nodeRoot shape value index with
     | .ok node => hex ⟨node⟩ === expected
@@ -99,25 +152,49 @@ def nodeAtGindex (oracle : Oracle) : Property IO := propertyM do
 /-- A proof built for an index of a value verifies against the root, and no other leaf does. -/
 def proofVerifies : Property IO := pureIO do
   let (shape, value) ← forAllWith typedText genTyped
-  let index ← forAll (genGindex shape)
+  let index ← forAll (Gen.frequency [(5, genNodeIndex shape value), (1, genGindex shape)])
   match Ssz.nodeRoot shape value index, Ssz.buildProof shape value index,
     Ssz.hashTreeRoot shape value with
   | .ok leaf, .ok proof, .ok root =>
+    label "a proof was built and checked"
+    classifyOne "nodes of the proof" ["1", "2 to 4", "5 to 8", "9 or more"]
+      (if proof.length ≤ 1 then "1" else if proof.length ≤ 4 then "2 to 4"
+        else if proof.length ≤ 8 then "5 to 8" else "9 or more")
+    -- A proof ends at a node: never at the root, and never under a mixed-in word.
+    classifyOne "walk" ["the mixed-in word", "on or under a spine", "inside the tree of the root",
+      "under a leaf of the tree of the root"] (walkClass shape value index)
     (Ssz.verifyMerkleProof leaf proof index root).toOption === some true
     let other := leaf.modify 0 (· + 1)
     (Ssz.verifyMerkleProof other proof index root).toOption === some false
-  | _, _, _ => pure ()
+  | .ok _, _, _ => label "the root, which has no proof: nothing checked"
+  | _, _, _ => label "no node at the index: nothing checked"
 
 /-- Indices of a multiproof: unrelated ones, and now and then a repeat or an ancestor. -/
-def genIndices : Gen (List Nat) :=
-  Gen.list (.linear 0 6) (Gen.frequency [(3, Gen.nat (.constant 1 63)), (1,
-      Gen.nat (.exponential 1 5000))])
+def genIndices : Gen (List Nat) := do
+  let some ← Gen.list (.constant 1 6) (Gen.frequency [(3, Gen.nat (.constant 1 63)),
+    (1, Gen.nat (.exponential 1 5000))])
+  let first := some.headD 2
+  Gen.frequency [
+    (8, pure some),
+    (1, pure []),
+    -- A relative of the first index, the index 0, or the first index twice.
+    (2, pure (some ++ [first ^^^ 1])),
+    (1, pure (some ++ [first / 2])),
+    (1, pure (some ++ [2 * first])),
+    (1, pure (some ++ [first])),
+    (1, pure (0 :: some)),
+    (1, pure [first, first ^^^ 1, 2 * (first / 2 ^^^ 1), 2 * (first / 2 ^^^ 1) + 1])]
 
 /-- Whether the request is one the specification's multiproof rebuilds a root from soundly. -/
 def unrelated (indices : List Nat) : Bool :=
   !indices.isEmpty && indices.eraseDups.length == indices.length &&
     indices.all fun a => indices.all fun b =>
-      a == b || !(List.range 64).any fun k => k > 0 && a >>> k == b
+      -- One index is above another when it is the other with its last bits dropped.
+      a == b || !(a.log2 > b.log2 && a >>> (a.log2 - b.log2) == b)
+
+/-- The reasons for which a request for several nodes is refused. -/
+def helperReasons : List String :=
+  ["EMPTY_REQUEST", "REPEATED_INDEX", "NESTED_INDEX", "ROOT_HAS_NO_BRANCH", "NOT_A_GINDEX"]
 
 /-- The helper indices are those of the cited specification, which refuses the same requests.
 
@@ -125,6 +202,8 @@ Where a request has no relatives, they are also those of `consensus-specs`. -/
 def helperIndices (oracle : Oracle) : Property IO := propertyM do
   let indices ← forAll genIndices
   pure do
+    labelOutcome helperReasons (Ssz.getHelperIndices indices)
+    classifyOne "indices" (countClasses 4) (countClass 4 indices.length)
     let cited ← oracle.ask ["spechelpers", toString indices]
     match Ssz.getHelperIndices indices with
     | .ok helpers =>
@@ -147,11 +226,17 @@ def nodesText (nodes : List (Array UInt8)) : String :=
 
 /-- The root of a multiproof is the one that both specifications rebuild. -/
 def multiproofRoot (oracle : Oracle) : Property IO := propertyM do
-  let indices ← forAll (Gen.filter (fun xs => unrelated xs && !xs.contains 1) genIndices)
+  -- The request is one that both specifications answer: no relatives, no root, no index 0.
+  let indices ← forAll (Gen.filter (fun xs => unrelated xs && xs.all (· > 1)) genIndices)
   let count := (Ssz.getHelperIndices indices).toOption.getD [] |>.length
   let leaves ← forAllWith nodesText (genNodes indices.length)
   let proof ← forAllWith nodesText (genNodes count)
   pure do
+    classifyOne "indices" ((countClasses 4).drop 1) (countClass 4 indices.length)
+    classifyOne "helpers" ["0", "1 to 4", "5 to 12", "13 or more"]
+      (if count == 0 then "0" else if count ≤ 4 then "1 to 4" else if count ≤ 12 then "5 to 12"
+        else "13 or more")
+    classify "two indices are siblings" (indices.any fun a => indices.contains (a ^^^ 1))
     let expected ← oracle.ask ["multiroot", nodesText leaves, nodesText proof, toString indices]
     expected === (← oracle.ask ["specroot", nodesText leaves, nodesText proof, toString indices])
     match Ssz.calculateMultiMerkleRoot leaves proof indices with
@@ -161,11 +246,14 @@ def multiproofRoot (oracle : Oracle) : Property IO := propertyM do
 /-- A request for a root, well formed or not, is answered or refused as the specification does. -/
 def proofRequests (oracle : Oracle) : Property IO := propertyM do
   let index ← forAll (Gen.frequency [(1, Gen.element [0, 1]), (4, Gen.nat (.exponential 1 5000))])
-  let off ← forAll (Gen.frequency [(6, pure 0), (1, pure 1), (1, pure 2)])
+  -- The count of nodes of a proof: the right one most of the time, one fewer, or one more.
+  let off ← forAll (Gen.frequency [(5, pure 1), (2, pure 0), (1, pure 2)])
   let leaves ← forAllWith nodesText (genNodes 1)
   let proof ← forAllWith nodesText (genNodes (index.log2 + off - 1))
   let indices ← forAll genIndices
-  let many ← forAllWith nodesText (genNodes indices.length)
+  -- A leaf for each index, and now and then a leaf too many.
+  let spare ← forAll (Gen.frequency [(7, pure 0), (1, pure 1)])
+  let many ← forAllWith nodesText (genNodes (indices.length + spare))
   let helpers := (Ssz.getHelperIndices indices).toOption.getD [] |>.length
   let shared ← forAllWith nodesText (genNodes (helpers + off - 1))
   pure do
@@ -173,6 +261,10 @@ def proofRequests (oracle : Oracle) : Property IO := propertyM do
       match result with
       | .ok root => hex ⟨root⟩
       | .error e => refusal e
+    labelOutcome ["NOT_A_GINDEX", "ROOT_HAS_NO_BRANCH", "BRANCH_LENGTH"]
+      (Ssz.calculateMerkleRoot (leaves.headD #[]) proof index) "one index"
+    labelOutcome (helperReasons ++ ["LEAF_COUNT", "PROOF_LENGTH"])
+      (Ssz.calculateMultiMerkleRoot many shared indices) "several indices"
     let cited ← oracle.ask ["specroot", nodesText leaves, nodesText proof, toString index]
     let got := text (Ssz.calculateMerkleRoot (leaves.headD #[]) proof index)
     got === (if cited.startsWith "error" then faultOf cited else cited)
@@ -201,6 +293,12 @@ def branchByDepth (oracle : Oracle) : Property IO := propertyM do
     let root := if wrong then root.set 31 (root[31] + 1) else root
     let expected ← oracle.ask ["branch", nodesText [leaf.toArray], nodesText branch,
       toString depth, toString index, hex ⟨root.toArray⟩]
+    classifyOne "depth" ["0", "1", "2 to 8", "9 or more"]
+      (if depth ≤ 1 then toString depth else if depth ≤ 8 then "2 to 8" else "9 or more")
+    classify "index: below 2 ^ depth" (index < 2 ^ depth)
+    classify "index: 2 ^ depth or more" (index ≥ 2 ^ depth)
+    classify "verdict: valid" (Ssz.isValidMerkleBranch leaf nodes depth index root)
+    classify "verdict: not valid" (!Ssz.isValidMerkleBranch leaf nodes depth index root)
     toString (Ssz.isValidMerkleBranch leaf nodes depth index root) === expected
     -- The normalized form of the light client: the same branch behind zero nodes.
     if index < 2 ^ depth then
@@ -209,6 +307,21 @@ def branchByDepth (oracle : Oracle) : Property IO := propertyM do
       normal.toOption === some (!wrong)
 
 instance : Inhabited (Gen Ssz.Desc) := ⟨pure .bool⟩
+
+open Ssz in
+/-- The same tree with every byte array, at any depth, under its other spelling.
+
+A progressive shape also gains a limit, which changes no tree. -/
+partial def respelled : Desc → Desc
+  | .vector element length => variant (.vector (respelled element) length)
+  | .list element limit => variant (.list (respelled element) limit)
+  | .progressiveList element _ => .progressiveList (respelled element) (some 7)
+  | .progressiveBitList _ => .progressiveBitList (some 9)
+  | .container names fields => .container names (fields.map respelled)
+  | .progressiveContainer active names fields =>
+    .progressiveContainer active names (fields.map respelled)
+  | .compatibleUnion selectors options => .compatibleUnion selectors (options.map respelled)
+  | shape => variant shape
 
 open Ssz in
 /-- A type near another: one name, limit, length, width, layout or spelling changed. -/
@@ -273,13 +386,30 @@ partial def genNear (shape : Desc) : Gen Desc :=
         .container names fields]
     | .compatibleUnion selectors options => Gen.element [
         .compatibleUnion (selectors.take 1) (options.take 1), options.headD .bool]
-  Gen.frequency [(2, pure shape), (3, inside), (3, outside)]
+  Gen.frequency [(2, pure shape), (3, inside), (3, outside), (4, pure (respelled shape))]
 
 /-- Two types merkleize alike exactly when the reference lets one union hold both. -/
 def compatible (oracle : Oracle) : Property IO := propertyM do
-  let left ← forAllWith typeText genDesc
+  let left ← forAllWith typeText (Gen.frequency [(5, genDesc),
+    (1, pure (.progressiveBitList none)),
+    -- Types that hold a byte array, which has two spellings of one tree.
+    (2, Gen.element [.byteVector 4, .byteList 4, .vector (.uint 1) 4, .list (.uint 1) 4,
+      .compatibleUnion [1, 2] [.byteVector 4, .vector (.uint 1) 4],
+      .vector (.byteVector 4) 3, .list (.byteList 4) 3, .vector (.list (.uint 1) 2) 2,
+      .list (.vector (.uint 1) 2) 5, .container ["a", "b"] [.byteVector 2, .bool],
+      .container ["a", "b"] [.uint 8, .list (.uint 1) 3],
+      .progressiveContainer [true, false, true] ["a", "b"] [.byteList 2, .bool]])])
   let right ← forAllWith typeText (genNear left)
   pure do
+    classifyOne "pair" ["the same type", "compatible, not the same", "not compatible"]
+      (if left == right then "the same type"
+        else if Ssz.isCompatible left right then "compatible, not the same" else "not compatible")
+    -- Two types of one basic or packed constructor merkleize alike only when they are the same.
+    classifyAny "compatible, not the same, both" (constructors.drop 6)
+      (if left != right && Ssz.isCompatible left right && constructorOf left == constructorOf right
+        then [constructorOf left] else [])
+    classify "compatible: a byte array and a sequence of bytes"
+      (Ssz.isCompatible left right && constructorOf left != constructorOf right)
     let expected ← oracle.ask ["sszcompat", typeText left, typeText right]
     ensure (right.wellFormed.toOption.isSome) "the near type is not well formed"
     (if Ssz.isCompatible left right then "ok" else "error") === expected
@@ -292,6 +422,11 @@ def compatible (oracle : Oracle) : Property IO := propertyM do
 def sizeBounds (oracle : Oracle) : Property IO := propertyM do
   let (shape, value) ← forAllWith typedText genTyped
   pure do
+    classifyOne "size" ["fixed", "variable with a bound", "variable with no bound"]
+      (if shape.isFixed then "fixed" else if shape.maxSize.isSome then "variable with a bound"
+        else "variable with no bound")
+    classify "the least and the most are equal, and the size is not fixed"
+      (!shape.isFixed && shape.maxSize == some shape.minSize)
     let expected ← oracle.ask ["sszbounds", typeText shape]
     -- The reference gives a progressive shape the bound `2 ^ 32`; EthLib gives it none.
     match shape.maxSize with
@@ -309,6 +444,8 @@ def sizeBounds (oracle : Oracle) : Property IO := propertyM do
 def defaults (oracle : Oracle) : Property IO := propertyM do
   let shape ← forAllWith typeText genDesc
   pure do
+    classify "has a default" shape.default.toOption.isSome
+    classify "has no default: a union inside" shape.default.toOption.isNone
     match shape.default with
     | .ok value =>
       ensure (value.fits shape) "the default does not fit"

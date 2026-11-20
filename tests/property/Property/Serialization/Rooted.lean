@@ -1,6 +1,7 @@
 import Hedgehog
 import Support
 import Property.Serialization.Common
+import Property.Serialization.Classes
 
 /-!
 # Typed SSZ values that keep their tree, as state machines
@@ -64,16 +65,26 @@ structure ListModel where
   numbers : List Nat
   deriving Repr
 
-/-- The model: a list of at most `limit` numbers before the switch, of any count after. -/
-def listModel (bounded : Bool) (limit : Nat) : Model ListModel ListStep where
-  initState := ListModel.mk <$> Gen.list (.linear 0 3) (Gen.nat (.linear 0 255))
+/-- The model: a list of at most `limit` numbers before the switch, of any count after.
+
+Now and then it starts with one of the counts of `starts`, where a write meets a full run. -/
+def listModel (bounded : Bool) (limit : Nat) (starts : List Nat := []) :
+    Model ListModel ListStep where
+  -- The first elements fit the limit: a list under a limit of 1 or 2 starts with no more.
+  initState := ListModel.mk <$> Gen.frequency [
+    (5, Gen.list (.linear 0 (if bounded then min 3 limit else 3)) (Gen.nat (.linear 0 255))),
+    (if starts.isEmpty then 0 else 1,
+      Gen.zipWith (fun count first => (List.range count).map (· + first)) (Gen.element starts)
+        (Gen.nat (.constant 0 255)))]
   transitions s :=
     let number := Gen.frequency [(3, Gen.nat (.linear 0 255)), (1,
         Gen.nat (.exponential 0 (2 ^ 64)))]
     Gen.frequency [
-      (4, .push <$> number),
-      (1, .pushMany <$> Gen.list (.linear 1 40) number),
-      (3, Gen.zipWith .set (Gen.frequency [(2, Gen.nat (.constant 0 (s.numbers.length - 1))),
+      (8, .push <$> number),
+      (2, .pushMany <$> Gen.list (.linear 1 40) number),
+      -- Enough at once to fill the runs of 16 and of 64 nodes of a progressive list.
+      (1, .pushMany <$> Gen.list (.constant 60 300) number),
+      (6, Gen.zipWith .set (Gen.frequency [(2, Gen.nat (.constant 0 (s.numbers.length - 1))),
         (1, pure (s.numbers.length - 1))]) number)]
   apply s
     | .push number => ⟨s.numbers ++ [number]⟩
@@ -94,6 +105,18 @@ def pushAll {switch fork : Fork} {α : Type} [Element α] {limit : Nat}
       pushAll (list.push (Element.make number) room) rest
     else none
 
+/-- Counts to start a list from: at its limit, or at the end of a run of a progressive spine.
+
+The runs hold 1, 4, 16, 64 and 256 nodes, so 5, 21, 85 and 341 nodes each fill a run.
+
+A count above 3,000 elements is left out: the reference would hash it at every step. -/
+def startsOf (α : Type) [Element α] (bounded : Bool) (limit : Nat) : List Nat :=
+  let element := SszType.desc α
+  let perNode := if element.isBasic then 32 / element.itemLength else 1
+  let counts := if bounded then [limit, limit - 1]
+    else [5, 21, 85, 341].flatMap fun nodes => [nodes * perNode - 1, nodes * perNode]
+  counts.filter fun count => 3 < count && count ≤ 3000
+
 /-- The rooted fork-chosen list against the list of its elements.
 
 After each write, the bytes and the root are those the reference gives the model.
@@ -102,25 +125,52 @@ The list is also read back from its bytes, which builds its tree afresh: the roo
 def listMachine (oracle : Oracle) (switch fork : Fork) (α : Type) [Element α] (limit : Nat)
     (typeOf : String) :
     StateMachine ListModel ListStep (RootedForkList switch fork α limit) IO where
-  toModel := listModel (fork < switch) limit
+  toModel := listModel (fork < switch) limit (startsOf α (fork < switch) limit)
   initSut s :=
-    match pushAll (RootedForkList.ofData #[] (fun _ => Nat.zero_le _)) s.numbers with
-    | some list => pure list
-    | none => throw (IO.userError "the first elements do not fit")
-  applySut list _ _ step :=
+    -- A short start is pushed element by element, and a long one built at once.
+    if s.numbers.length ≤ 3 then
+      match pushAll (RootedForkList.ofData #[] (fun _ => Nat.zero_le _)) s.numbers with
+      | some list => pure list
+      | none => throw (IO.userError "the first elements do not fit")
+    else
+      let data : Array α := (s.numbers.map Element.make).toArray
+      if fits : fork < switch → data.size ≤ limit then pure (RootedForkList.ofData data fits)
+      else throw (IO.userError "the first elements do not fit")
+  applySut list _ _ step := do
     match step with
     | .push number =>
+      label "step: push"
       match pushAll list [number] with
       | some next => pure next
       | none => failWith "the push was refused"
     | .pushMany numbers =>
+      label "step: push many"
       match pushAll list numbers with
       | some next => pure next
       | none => failWith "the pushes were refused"
     | .set index number =>
+      label "step: set"
+      classify "step: set the last element" (index + 1 == list.data.size)
+      classify "step: set the first element" (index == 0)
       if inside : index < list.data.size then pure (list.set index (Element.make number) inside)
       else failWith "the index is outside the list"
   invariants list s := do
+    let element := SszType.desc α
+    let count := s.numbers.length
+    let nodes := if element.isBasic then (count * element.itemLength + 31) / 32 else count
+    -- A list under a limit has no more nodes than its limit gives it.
+    let most := if fork < switch then
+        (if element.isBasic then (limit * element.itemLength + 31) / 32 else limit)
+      else 342
+    let classes := [(0, "0"), (1, "1"), (2, "2 to 5"), (6, "6 to 21"), (22, "22 to 85"),
+      (86, "86 to 341"), (342, "342 or more")]
+    classifyAny "reached, in nodes" ((classes.filter (·.1 ≤ most)).map (·.2))
+      [if nodes ≤ 1 then toString nodes else if nodes ≤ 5 then "2 to 5"
+        else if nodes ≤ 21 then "6 to 21" else if nodes ≤ 85 then "22 to 85"
+        else if nodes ≤ 341 then "86 to 341" else "342 or more"]
+    classify "reached: a last node that is full"
+      (count > 0 && (!element.isBasic || count * element.itemLength % 32 == 0))
+    if fork < switch then classify "reached: the limit" (count == limit)
     let expected ← oracle.ask ["sszenc", typeOf, elementsText α s.numbers]
     typedEncoded list === expected
     -- The same elements read from their bytes have a tree built from the leaves up.
@@ -175,6 +225,7 @@ structure SetWord where
 instance : Command SetWord VectorState Oracle IO where
   check _ c _ := c.index < wordCount
   apply _ c s := do
+    label "ran: SET_WORD"
     if inside : c.index < wordCount then
       pure { s with words := s.words.set c.index (UInt64.ofNat c.number) inside,
                     wordModel := s.wordModel.set c.index c.number, writes := s.writes + 1 }
@@ -193,6 +244,7 @@ structure SetPair where
 instance : Command SetPair VectorState Oracle IO where
   check _ c _ := c.index < pairCount
   apply _ c s := do
+    label "ran: SET_PAIR"
     if inside : c.index < pairCount then
       pure { s with pairs := s.pairs.set c.index (Element.make c.number) inside,
                     pairModel := s.pairModel.set c.index c.number, writes := s.writes + 1 }
@@ -208,6 +260,9 @@ structure ShiftWords where
 instance : Command ShiftWords VectorState Oracle IO where
   check _ c _ := c.fresh.length ≤ wordCount
   apply _ c s := do
+    label "ran: SHIFT_WORDS"
+    classify "SHIFT_WORDS: by none" c.fresh.isEmpty
+    classify "SHIFT_WORDS: by every element" (c.fresh.length == wordCount)
     let fresh : Vector UInt64 c.fresh.length :=
       Vector.ofFn fun i => UInt64.ofNat (c.fresh.getD i.val 0)
     if le : c.fresh.length ≤ wordCount then
@@ -227,6 +282,8 @@ structure ShiftPairs where
 instance : Command ShiftPairs VectorState Oracle IO where
   check _ c _ := c.fresh.length ≤ pairCount
   apply _ c s := do
+    label "ran: SHIFT_PAIRS"
+    classify "SHIFT_PAIRS: by every element" (c.fresh.length == pairCount)
     let fresh : Vector Pair c.fresh.length :=
       Vector.ofFn fun i => Element.make (c.fresh.getD i.val 0)
     if le : c.fresh.length ≤ pairCount then
@@ -235,13 +292,17 @@ instance : Command ShiftPairs VectorState Oracle IO where
                         c.fresh, writes := s.writes + 1 }
     else failWith "more fresh elements than the vector holds"
   label c := s!"SHIFT_PAIRS({c.fresh})"
-  build _ := ShiftPairs.mk <$> Gen.list (.linear 0 pairCount) (Gen.nat (.linear 0 9999))
+  build _ := ShiftPairs.mk <$> Gen.frequency [
+    (3, Gen.list (.linear 0 pairCount) (Gen.nat (.linear 0 9999))),
+    (1, Gen.list (.singleton pairCount) (Gen.nat (.linear 0 9999)))]
 
 /-- Read both vectors back from their bytes, which drops the trees they kept. -/
 structure Reload where
 
 instance : Command Reload VectorState Oracle IO where
   apply _ _ s := do
+    label "ran: RELOAD"
+    classify "RELOAD: after a write" (s.writes > 0)
     match SszType.encode s.words >>= SszType.decode (α := RootedVector UInt64 wordCount),
       SszType.encode s.pairs >>= SszType.decode (α := RootedVector Pair pairCount) with
     | .ok words, .ok pairs => pure { s with words, pairs }
@@ -251,14 +312,15 @@ instance : Command Reload VectorState Oracle IO where
 
 /-- Compare both vectors with the reference. -/
 structure CheckRoots where
-  oracle : Oracle
 
 instance : Command CheckRoots VectorState Oracle IO where
-  apply _ c s := do
-    checkVectors c.oracle s
+  apply oracle _ s := do
+    label "ran: CHECK"
+    classify "CHECK: after a write" (s.writes > 0)
+    checkVectors oracle s
     pure s
   label _ := "CHECK"
-  build oracle := pure ⟨oracle⟩
+  build _ := pure {}
 
 /-- A write outside a vector is no command: its check refuses it, and the state stays. -/
 structure SetOutside where
@@ -275,6 +337,6 @@ def vectorScenario (oracle : Oracle) : Property IO :=
   scenario .madhouse oracle [
     Command.gen SetWord, Command.gen SetWord, Command.gen SetPair, Command.gen ShiftWords,
     Command.gen ShiftPairs, Command.gen Reload, Command.gen CheckRoots, Command.gen CheckRoots,
-    Command.gen SetOutside]
+    Command.gen SetOutside] (.linear 1 30)
 
 end SerializationProperty

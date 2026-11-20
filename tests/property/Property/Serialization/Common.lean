@@ -15,13 +15,6 @@ open Hedgehog Support EthLib.Serialization
 
 namespace SerializationProperty
 
-/-- Two outcomes are equal when both are the same value or both the same error. -/
-instance {ε α : Type} [BEq ε] [BEq α] : BEq (Except ε α) where
-  beq
-    | .ok a, .ok b => a == b
-    | .error a, .error b => a == b
-    | _, _ => false
-
 /-- Bytes in lower-case hexadecimal, and nothing for none. -/
 def hexOf (bytes : Array UInt8) : String :=
   if bytes.isEmpty then "" else hex ⟨bytes⟩
@@ -39,26 +32,39 @@ partial def itemText : Rlp.Item → String
   | .bytes data => quoted (hexOf data.data)
   | .list items => jsonArray (items.map itemText)
 
-/-- A byte string that reaches each form of the prefix. -/
+/-- A long byte string of one byte repeated: cheap to generate, and its length is the point. -/
+def genRun (lengths : List Nat) : Gen ByteArray :=
+  Gen.zipWith (fun length byte => ⟨Array.replicate length byte⟩) (Gen.element lengths)
+    (Gen.element [0, 1, 0x7f, 0x80, 0xff])
+
+/-- A byte string that reaches each form of the prefix.
+
+A length is in the first byte up to 55, on one byte up to 255, on two up to 65535, then on three. -/
 def genRlpBytes : Gen ByteArray :=
   Gen.frequency [
-    (3, genBytes (.linear 0 8)),
-    (2, genBytes (.singleton 1)),
-    (2, (fun b => ⟨#[b]⟩) <$> Gen.element [0, 0x7f, 0x80, 0xff]),
-    (2, genBytes (.constant 54 57)),
-    (1, genBytes (.constant 254 258))]
+    (6, genBytes (.linear 0 8)),
+    (1, pure .empty),
+    (4, genBytes (.singleton 1)),
+    (4, (fun b => ⟨#[b]⟩) <$> Gen.element [0, 0x7f, 0x80, 0xff]),
+    (4, genBytes (.constant 54 57)),
+    (3, genBytes (.constant 254 258)),
+    (2, genRun [259, 1000, 65535]),
+    (3, genRun [65536, 65537, 70000])]
 
 /-- An item of at most the depth. -/
 def genItemOf : Nat → Gen Rlp.Item
   | 0 => Rlp.Item.bytes <$> genRlpBytes
   | depth + 1 => Gen.frequency [
       (3, Rlp.Item.bytes <$> genRlpBytes),
-      (2, Rlp.Item.list <$> Gen.list (.linear 0 5) (genItemOf depth)),
+      (3, Rlp.Item.list <$> Gen.list (.linear 0 4) (genItemOf depth)),
+      (1, Rlp.Item.list <$> Gen.list (.constant 1 2) (genItemOf depth)),
       (1, Rlp.Item.list <$>
-        Gen.list (.constant 50 58) (Rlp.Item.bytes <$> genBytes (.singleton 0)))]
+        Gen.list (.constant 50 58) (Rlp.Item.bytes <$> genBytes (.singleton 0))),
+      (1, Rlp.Item.list <$>
+        Gen.list (.constant 250 260) (Rlp.Item.bytes <$> genBytes (.singleton 0)))]
 
-/-- An item, deeper at a larger size. -/
-def genItem : Gen Rlp.Item := Gen.sized fun size => genItemOf (min 3 size.log2)
+/-- An item, deeper at a larger size: up to five lists inside one another. -/
+def genItem : Gen Rlp.Item := Gen.sized fun size => genItemOf (min 5 (size.log2 + 1))
 
 /-! ## SSZ types -/
 
@@ -110,6 +116,13 @@ def faultOf (answer : String) : String := " ".intercalate ((answer.splitOn " ").
 def genEdge (edges : List Nat) (range : Range Nat) : Gen Nat :=
   Gen.frequency [(2, Gen.element edges), (1, Gen.nat range)]
 
+/-- A limit far above any count: a power of two up to `2 ^ 70`, or one more.
+
+The tree under it is zero subtrees beside a few nodes, deeper than the table of zero roots. -/
+def genHugeLimit : Gen Nat :=
+  Gen.zipWith (fun power near => 2 ^ power + near)
+    (Gen.element [10, 20, 32, 40, 62, 63, 64, 65, 66, 69, 70, 72, 73, 80]) (Gen.element [0, 0, 1])
+
 open Ssz in
 /-- A basic type. -/
 def genBasic : Gen Desc :=
@@ -119,12 +132,14 @@ open Ssz in
 /-- A type that holds no other type: basic, bytes or bits. -/
 def genLeaf : Gen Desc :=
   Gen.frequency [
-    (3, genBasic),
+    (4, genBasic),
     (1, Desc.byteVector <$> genEdge [1, 31, 32, 33, 64, 65] (.linear 1 70)),
     (1, Desc.byteList <$> genEdge [0, 1, 31, 32, 33, 64, 65] (.linear 0 70)),
-    (1, Desc.bitVector <$> genEdge [1, 7, 8, 9, 255, 256, 257, 512, 513] (.linear 1 520)),
-    (1, Desc.bitList <$> genEdge [0, 1, 7, 8, 255, 256, 257, 513] (.linear 0 520)),
-    (1, pure (.progressiveBitList none))]
+    (2, Desc.byteList <$> genHugeLimit),
+    (2, Desc.bitVector <$> genEdge [1, 7, 8, 9, 255, 256, 257, 512, 513] (.linear 1 520)),
+    (2, Desc.bitList <$> genEdge [0, 1, 7, 8, 9, 255, 256, 257, 513] (.linear 0 520)),
+    (2, Desc.bitList <$> genHugeLimit),
+    (2, pure (.progressiveBitList none))]
 
 /-- The names of the fields of a container. -/
 def fieldNames (count : Nat) : List String := (List.range count).map fun i => s!"f{i}"
@@ -161,8 +176,10 @@ def genDescOf : Nat → Gen Desc
         pure (.vector element length)),
       (2, do
         let element ← inner
-        let limit ← if element.isBasic then genEdge [0, 1, 31, 32, 33, 64, 65] (.linear 0 70)
-          else genEdge [0, 1, 2, 3, 4, 5, 8, 9] (.linear 0 9)
+        let limit ← Gen.frequency [
+          (3, if element.isBasic then genEdge [0, 1, 31, 32, 33, 64, 65] (.linear 0 70)
+            else genEdge [0, 1, 2, 3, 4, 5, 8, 9] (.linear 0 9)),
+          (2, genHugeLimit)]
         pure (.list element limit)),
       (2, (Desc.progressiveList · none) <$> inner),
       (2, do
@@ -188,15 +205,24 @@ open Ssz in
 /-- A count of elements of a progressive shape: at the ends of the runs of 1, 4 and 16 nodes. -/
 def genSpineCount (perNode : Nat) (wide : Bool) : Gen Nat :=
   if wide then do
-    let nodes ← Gen.element [0, 1, 2, 5, 6, 21, 22]
+    -- The runs hold 1, 4, 16, 64 and 256 nodes: 85 nodes fill four runs, and 341 fill five.
+    let nodes ← Gen.frequency [(4, Gen.element [0, 1, 2, 5, 6, 21, 22]),
+      (2, Gen.element [85, 86]), (if perNode ≤ 4 then 1 else 0, Gen.element [341, 342])]
     let off ← Gen.element [0, 0, 1, perNode - 1]
     Gen.frequency [(3, pure (nodes * perNode + off)), (1, Gen.nat (.linear 0 (30 * perNode)))]
   else Gen.frequency [(1, Gen.element [0, 1, 2, 5, 6]), (1, Gen.nat (.linear 0 7))]
 
-/-- A count up to a limit: none, all, or some. -/
+/-- A count up to a limit: none, all, or some; a few under a limit far above any count. -/
 def genCount (limit : Nat) : Gen Nat :=
-  Gen.frequency [(1, pure 0), (1, pure limit), (1, pure (limit - 1)), (2,
+  if limit > 600 then Gen.frequency [(1, pure 0), (1, pure 1), (2, Gen.nat (.linear 0 40))]
+  else Gen.frequency [(1, pure 0), (1, pure limit), (1, pure (limit - 1)), (2,
       Gen.nat (.linear 0 limit))]
+
+/-- A count of bits up to a limit: at the edges of a byte and of a node, where they fit. -/
+def genBitCount (limit : Nat) : Gen Nat :=
+  Gen.frequency [
+    (3, Gen.element ([0, 1, 7, 8, 9, 255, 256, 257].filter (· ≤ limit))),
+    (1, genCount limit)]
 
 open Ssz in
 /-- A value that fits the type; `wide` allows the long progressive values at the top only. -/
@@ -204,15 +230,19 @@ partial def genValueOf (wide : Bool) : Desc → Gen Value
   | .bool => .bool <$> Gen.bool
   | .uint width => .uint <$> genNatBits (8 * width)
   | .byteVector length => (fun b => .bytes b.data) <$> genBytesN length
-  | .byteList limit => do
-    let count ← genCount limit
-    (fun b => .bytes b.data) <$> genBytesN count
+  | .byteList limit =>
+    -- Under a great limit, now and then more bytes than an offset of two bytes can pass.
+    Gen.frequency [
+      (12, do
+        let count ← genCount limit
+        (fun b => .bytes b.data) <$> genBytesN count),
+      (if limit ≥ 70000 then 1 else 0, (fun b => .bytes b.data) <$> genRun [65536, 70000])]
   | .bitVector length => .bits <$> Gen.array (.singleton length) Gen.bool
   | .bitList limit => do
-    let count ← genCount limit
+    let count ← genBitCount limit
     .bits <$> Gen.array (.singleton count) Gen.bool
   | .progressiveBitList _ => do
-    let count ← genSpineCount 256 wide
+    let count ← Gen.frequency [(1, genSpineCount 256 wide), (1, genBitCount 300)]
     .bits <$> Gen.array (.singleton count) Gen.bool
   | .vector element length => .seq <$> Gen.list (.singleton length) (genValueOf false element)
   | .list element limit => do
@@ -221,8 +251,9 @@ partial def genValueOf (wide : Bool) : Desc → Gen Value
   | .progressiveList element _ => do
     let count ← genSpineCount (if element.isBasic then 32 / element.itemLength else 1) wide
     .seq <$> Gen.list (.singleton count) (genValueOf false element)
-  | .container _ fields => .seq <$> Gen.sequence (fields.map (genValueOf false))
-  | .progressiveContainer _ _ fields => .seq <$> Gen.sequence (fields.map (genValueOf false))
+  -- A struct keeps a value for each field when it shrinks: with one fewer it is no value of it.
+  | .container _ fields | .progressiveContainer _ _ fields =>
+    .seq <$> Gen.sequence (fields.map (genValueOf false)) (atLeast := fields.length)
   | .compatibleUnion selectors options => do
     let slot ← Gen.nat (.constant 0 (options.length - 1))
     .union (selectors.getD slot 0) <$> genValueOf wide (options.getD slot .bool)
