@@ -1,0 +1,13 @@
+# What oracle/kernels*.py import; hashlib, hmac, zlib and unicodedata are the standard library.
+# eth-consensus-specs ships the trusted setup of the KZG ceremony as a preset.
+crc32c==2.9.post0
+cryptography==50.0.2
+eth-consensus-specs==1.7.0b4
+py-ecc==8.0.0
+pycryptodome==4.5.0
+# NFKD over every code point needs the tables of Unicode 16.0.0, which Python 3.14 has.
+# An older Python compares the code points it knows and counts the others.
+# To compare all of them, name the file of the Unicode Character Database:
+#     curl -o UnicodeData.txt https://www.unicode.org/Public/16.0.0/ucd/UnicodeData.txt
+#     ETHLIB_UCD=$PWD/UnicodeData.txt lake exe kernels-property 1000
+# Its sha256 is ff58e5823bd095166564a006e47d111130813dcf8bf234ef79fa51a870edb48f.
