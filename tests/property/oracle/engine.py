@@ -10,8 +10,8 @@
 #     reads <name> <hex of JSON text>     Whether a value is a structure of a response.
 #     newpayload <hex of a case>          The answers allowed for a call, and its parameters.
 #
-# The rules are written from execution-apis at commit 3284ee8: src/engine/*.md and
-# src/schemas/base-types.yaml.
+# The rules are written from execution-apis at commit 3284ee8.
+# The files are src/engine/*.md and src/schemas/base-types.yaml.
 
 import base64
 import hashlib
@@ -112,8 +112,8 @@ def wire(kind, text):
     return f"{verdict(by_yaml)} {verdict(by_common)} {shown}"
 
 
-# PyJWT checks the tag, the algorithm and the form only: authentication.md has the
-# reader ignore every claim but iat, so exp and nbf must not count.
+# PyJWT checks the tag, the algorithm and the form only.
+# By authentication.md the reader ignores every claim but iat, so exp and nbf must not count.
 PYJWT_OPTIONS = {
     "verify_iat": False,
     "verify_exp": False,
@@ -122,8 +122,8 @@ PYJWT_OPTIONS = {
     "verify_iss": False,
 }
 
-# JWT: RFC 7515 (compact form, base64url without padding), RFC 7518 section 3.2
-# (HS256), RFC 7519 (NumericDate), RFC 8259 (JSON) and authentication.md.
+# JWT: RFC 7515 (compact form, base64url without padding) and RFC 7518 section 3.2 (HS256).
+# Also RFC 7519 (NumericDate), RFC 8259 (JSON) and authentication.md.
 
 
 def b64url(data):

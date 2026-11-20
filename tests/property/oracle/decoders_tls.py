@@ -172,7 +172,7 @@ def key_share(reader):
 # The extension type of each form, and its reader.
 FORMS = {
     "supportedVersions": (43, lambda r: "sv:" + u16s(r, 1, 2, 254)),
-    "selectedVersion": (43, lambda r: f"selv:{r.uint(2)}"),
+    "selectedVersion": (43, lambda r: f"chosen:{r.uint(2)}"),
     "supportedGroups": (10, lambda r: "sg:" + u16s(r, 2, 2, 65535)),
     "signatureAlgorithms": (13, lambda r: "sa:" + u16s(r, 2, 2, 65534)),
     "clientKeyShare": (

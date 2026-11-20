@@ -318,3 +318,21 @@ What is missing:
 
 Bugs of the library: none met.
 One trap that is Lean's and EthLib's, not the library's: instantiating the generic machine at 8 limbs inside `main` made the compiler specialize EthLib's unrolled product there and time out at 200,000 heartbeats; `@[nospecialize, noinline]` on the generic definitions fixed it.
+
+## The sponge property against the block step of before #3346, by the coordinator
+
+The first round compared Keccak-256 and Keccak-512 alone, and so passed a block step that XORed lanes 0 to 16 only.
+Upstream fixed that step in #3346.
+To see what this driver would have said, the step was put back in a copy of this branch: lanes 17 to 24 left alone, the rest of the library as it is.
+`HEDGEHOG_ONLY=sponge,rate lake exe kernels-property 1000` there fails after 2 tests and 6 shrinks:
+
+```text
+✗ keccak: the sponge at every rate failed after 2 tests and 6 shrinks.
+    forAll 144
+    forAll 0
+    forAll
+```
+
+That is the least rate of whole lanes above 136 bytes, and the empty message.
+"keccak: the hasher and both digests", which runs the two rates in use, passes on the same copy, as the first round's properties did.
+The copy was built and run once on 2026-11-20 and then removed; the branch itself was never changed.

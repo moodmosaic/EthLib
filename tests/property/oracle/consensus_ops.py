@@ -1,9 +1,9 @@
 """The calls of the consensus oracle: what to run on a state, and its argument."""
 
-# `prepare` reads the words of an argument, builds the operation with
-# consensus-specs types, and returns its SSZ bytes in hexadecimal with the
-# function that applies the call.  It may set up the state first (a deposit
-# needs a deposit root), so the caller writes the state after it.
+# `prepare` reads the words of an argument and builds the operation with consensus-specs types.
+# It returns the SSZ bytes of the operation in hexadecimal with the function that applies the call.
+# It may set up the state first (a deposit needs a deposit root).
+# So the caller writes the state after it.
 
 import hashlib
 import inspect

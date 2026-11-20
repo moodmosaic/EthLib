@@ -8,8 +8,9 @@
 #     lc_force <now>
 #         process_light_client_store_force_update: the verdict and the digest.
 #
-# The oracle builds each update from one template state, whose finalized root
-# and next sync committee it sets so that the branches of the update are true.
+# The oracle builds each update from one template state.
+# It sets the finalized root and next sync committee of that state.
+# It sets them so that the branches of the update are true.
 # BLS is off, so the signers are only counted.
 
 import atexit

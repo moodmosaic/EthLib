@@ -7,14 +7,14 @@
 #
 # The schema is that of the libp2p specifications, written here as the table SCHEMA:
 #
-#   pubsub/README.md              RPC, RPC.SubOpts, Message
-#   gossipsub-v1.0.md             ControlMessage, ControlIHave, ControlIWant, ControlGraft
-#   gossipsub-v1.1.md             ControlPrune, PeerInfo
-#   gossipsub-v1.2.md             ControlIDontWant
-#   extensions/extensions.proto   ControlExtensions, PartialMessagesExtension, the new fields
+# - pubsub/README.md              RPC, RPC.SubOpts, Message
+# - gossipsub-v1.0.md             ControlMessage, ControlIHave, ControlIWant, ControlGraft
+# - gossipsub-v1.1.md             ControlPrune, PeerInfo
+# - gossipsub-v1.2.md             ControlIDontWant
+# - extensions/extensions.proto   ControlExtensions, PartialMessagesExtension, the new fields
 #
-# The experimental fields of extensions.proto (6492434 and 6492435) are left out, so both
-# references see them as fields that the schema does not name.
+# The experimental fields of extensions.proto (6492434 and 6492435) are left out.
+# So both references see them as fields that the schema does not name.
 
 from decoders_util import tohex, unhex
 from google.protobuf import descriptor_pb2, descriptor_pool, message_factory, unknown_fields

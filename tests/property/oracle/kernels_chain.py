@@ -1,8 +1,8 @@
 """Forks, activations and blob schedules, written from the EIPs apart from EthLib."""
 
-# The order of the forks: EIP-7568 up to Shapella, with the forks of the
-# consensus layer where they activated on mainnet, then the meta EIPs
-# EIP-7569, EIP-7600, EIP-7607, EIP-8134, EIP-8135, EIP-7773 and EIP-8081.
+# The order of the forks.
+# EIP-7568 up to Shapella, with the forks of the consensus layer where they activated on mainnet.
+# Then the meta EIPs EIP-7569, EIP-7600, EIP-7607, EIP-8134, EIP-8135, EIP-7773 and EIP-8081.
 
 FORKS = [
     "frontier",
@@ -38,8 +38,8 @@ FORKS = [
 
 DEPOSIT_CONTRACT = "00000000219ab540356cbb839cbe05303d7705fa"
 
-# Mainnet: EIP-6953 for the blocks and for Shapella, EIP-3675 and EIP-7643 for
-# Paris, EIP-7569, EIP-7600, EIP-7607, EIP-8134 and EIP-8135 for the times.
+# Mainnet: EIP-6953 for the blocks and for Shapella, EIP-3675 and EIP-7643 for Paris.
+# EIP-7569, EIP-7600, EIP-7607, EIP-8134 and EIP-8135 for the times.
 MAINNET = [
     ("frontier", "block", 0),
     ("homestead", "block", 1_150_000),
@@ -64,8 +64,8 @@ MAINNET = [
     ("bpo2", "time", 1_767_747_671),
 ]
 
-# Hoodi: the genesis file of eth-clients/hoodi, at the commit that the text of
-# `ChainConfig.hoodi` pins, and EIP-7600 and EIP-7607 for the times.
+# Hoodi: the genesis file of eth-clients/hoodi, and EIP-7600 and EIP-7607 for the times.
+# The file is at the commit that the text of `ChainConfig.hoodi` pins.
 # That file ends at `bpo2Time`: the change before it removed `amsterdamTime`.
 # The Activation table of EIP-7773 has an empty row for Hoodi since 2026-11-18.
 # So Glamsterdam has no activation on Hoodi.

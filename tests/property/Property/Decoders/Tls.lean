@@ -297,7 +297,7 @@ def genPayload : PayloadForm → Gen (List UInt8 × String)
     pure (bytes, s!"sv:{shown}")
   | .selectedVersion => do
     let code ← genCode
-    pure (be 2 code, s!"selv:{code}")
+    pure (be 2 code, s!"chosen:{code}")
   | .supportedGroups => do
     let (bytes, shown) ← genCodes 2 1 6
     pure (bytes, s!"sg:{shown}")
@@ -340,7 +340,7 @@ def genBrokenPayload : Gen (String × List UInt8) :=
 /-- The payload of an extension as the oracle writes one. -/
 def showPayload : Payload → String
   | .supportedVersions versions => s!"sv:{bracket (versions.map (toString ·.val))}"
-  | .selectedVersion version => s!"selv:{version.val}"
+  | .selectedVersion version => s!"chosen:{version.val}"
   | .supportedGroups groups => s!"sg:{bracket (groups.map (toString ·.val))}"
   | .signatureAlgorithms algorithms => s!"sa:{bracket (algorithms.map (toString ·.val))}"
   | .clientKeyShare shares =>

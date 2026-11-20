@@ -3,12 +3,13 @@
 # uni <start> <count> <entries>   Compare the entries of a range of code points.
 # uniorder <code points>          NFKD of a string, or skip when the reference lacks one.
 #
-# An entry is `code:class:d1.d2...`, in hexadecimal, for a code point whose
-# combining class is not 0 or whose full decomposition is not itself.
+# An entry is `code:class:d1.d2...`, in hexadecimal.
+# A code point has one when its combining class is not 0 or its full decomposition is not itself.
 #
-# `ETHLIB_UCD` names a `UnicodeData.txt`; EthLib's tables are those of Unicode
-# 16.0.0.  Without it the reference is `unicodedata`, and a code point that the
-# host's version does not assign is counted and not compared.
+# `ETHLIB_UCD` names a `UnicodeData.txt`.
+# EthLib's tables are those of Unicode 16.0.0.
+# Without `ETHLIB_UCD` the reference is `unicodedata`.
+# Then a code point that the host's version does not assign is counted and not compared.
 
 import os
 import unicodedata

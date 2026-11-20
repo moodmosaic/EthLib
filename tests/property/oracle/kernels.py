@@ -1,7 +1,8 @@
 """References for the kernels: one command per line, one answer per line."""
 
-# Words are separated by tabs.  Integers are decimal, bytes are hexadecimal
-# (`-` for none).  Each module lists its commands in its `answer`.
+# Words are separated by tabs.
+# Integers are decimal, bytes are hexadecimal (`-` for none).
+# Each module lists its commands in its `answer`.
 
 import os
 import sys

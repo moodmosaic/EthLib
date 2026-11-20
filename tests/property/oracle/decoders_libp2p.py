@@ -11,7 +11,7 @@
 # x509_time <tag> <text>   The seconds from 1970 of a UTCTime or a GeneralizedTime.
 # p256_sign <key> <message>   The key as a SubjectPublicKeyInfo, and a signature.
 #
-# The facts of a certificate are words `name=value`:
+# The facts of a certificate are words `name=value`.
 #   rfc      `ok`, or the rule of RFC 5280 or X.690 that the bytes break.
 #   subset   `-`, or what RFC 5280 allows and EthLib documents that it does not read:
 #            `value-tag`, `validity-inverted` or `compressed-point`.

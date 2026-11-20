@@ -1,8 +1,9 @@
 """The fork choice of the pyspec, driven by abstract commands."""
 
-# The oracle builds every object (blocks, attestations, slashings) with the
-# pyspec, runs the handler of the pyspec on it, and answers with the steps it
-# ran and a view of its store.  A step is `<kind>:<argument>:<status>`:
+# The oracle builds every object (blocks, attestations, slashings) with the pyspec.
+# It runs the handler of the pyspec on the object.
+# It answers with the steps it ran and a view of its store.
+# A step is `<kind>:<argument>:<status>`:
 #
 #     t:<ms>:<status>       on_tick at an absolute time
 #     b:<hex>:<status>      on_block of a SignedBeaconBlock
@@ -18,11 +19,11 @@
 #     ge:<hex>:-:<ms>:<verdict>          validate_execution_payload_envelope_gossip
 #     gp:<hex>:-:<ms>:<verdict>          validate_payload_attestation_message_gossip
 #
-# A verdict is accept, ignore, reject, or error when the pyspec raises
-# something else.  The gossip checks share one `Seen` for the whole run.
+# A verdict is accept, ignore, reject, or error when the pyspec raises something else.
+# The gossip checks share one `Seen` for the whole run.
 #
-# The driver runs the same steps on EthLib and compares each status and the
-# view.  BLS is off on both sides.
+# The driver runs the same steps on EthLib and compares each status and the view.
+# BLS is off on both sides.
 
 import atexit
 import collections

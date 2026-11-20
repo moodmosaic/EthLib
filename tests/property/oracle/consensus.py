@@ -16,9 +16,10 @@
 #     pure <call> <arguments>
 #         A helper that needs no state.
 #
-# A signature is valid when its first 32 bytes are the SHA-256 of the public
-# keys followed by the message.  The driver gives EthLib the same check, so
-# the test covers domains and signing roots without a pairing.
+# Take the SHA-256 of the public keys followed by the message.
+# A signature is valid when its first 32 bytes are that hash.
+# The driver gives EthLib the same check.
+# So the test covers domains and signing roots without a pairing.
 
 import importlib
 import os
