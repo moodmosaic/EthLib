@@ -2,18 +2,24 @@
 
 # Words are separated by tabs, bytes are in hexadecimal, `-` is the empty string.
 # An answer that starts with `error` says the reference refused the input.
-# Each reference is a library (hashlib, cryptography, pycryptodome, crc32c), or a
-# transcription of the source text (RFC 7693, 7748, 7914, 6979, SP 800-38A, the
-# Ethash specification, ERC-2335) that is checked against a library at start.
+# Each reference is a library (hashlib, cryptography, pycryptodome, crc32c) or a transcription.
+# The transcriptions are of RFC 7693, 7748, 7914 and 6979, SP 800-38A, Ethash and ERC-2335.
+# Each transcription is checked against a library at start.
+# `hashes_aes.py` holds Rijndael and GCM from their texts, and `hashes_cost.py` counted work.
 
 import hashlib
 import hmac
 import json
+import os
 import struct
 import sys
 import unicodedata
 import zlib
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import hashes_aes
+import hashes_cost
 from Crypto.Cipher import AES
 from Crypto.Hash import RIPEMD160, keccak
 from cryptography.exceptions import InvalidTag
@@ -461,6 +467,10 @@ def ks_decrypt(store, password):
             return None
         if not isinstance(store["path"], str) or not isinstance(store["uuid"], str):
             return None
+        # The schema of the ERC gives both optional fields the type string.
+        for name in ("description", "pubkey"):
+            if name in store and not isinstance(store[name], str):
+                return None
         crypto = store["crypto"]
         for name in ("kdf", "checksum", "cipher"):
             module = crypto[name]
@@ -470,6 +480,9 @@ def ks_decrypt(store, password):
                 return None
             if not isinstance(module["message"], str):
                 return None
+        # Password verification reads bytes 16 to 32 of the key, so a shorter key is refused.
+        if crypto["kdf"]["params"]["dklen"] < 32:
+            return None
         key = ks_key(crypto["kdf"], ks_password(password))
         if crypto["checksum"]["function"] != "sha256":
             return None
@@ -477,9 +490,9 @@ def ks_decrypt(store, password):
             return None
         message = bytes.fromhex(crypto["cipher"]["message"])
         checksum = bytes.fromhex(crypto["checksum"]["message"])
-        if sha256(key[16:32] + message) != checksum:
-            return None
         iv = bytes.fromhex(crypto["cipher"]["params"]["iv"])
+        if len(iv) != 16 or sha256(key[16:32] + message) != checksum:
+            return None
         op = Cipher(algorithms.AES(key[:16]), modes.CTR(iv)).decryptor()
         return op.update(message) + op.finalize()
     except (KeyError, ValueError, TypeError):
@@ -494,7 +507,10 @@ def ks_make(mutation, kdf, cost, r, p, dklen, salt, iv, password, tried, secret)
     else:
         params |= {"c": cost, "prf": "hmac-sha256"}
     module = {"function": kdf, "params": params, "message": ""}
-    key = ks_key(module, ks_password(password))
+    # A key of 16 to 31 bytes seals as the slices of the ERC read it, `key[16:32]` cut short.
+    # A shorter one is no AES key: the store is then sealed with 32 bytes, and says less.
+    sealing = {"function": kdf, "params": params | {"dklen": dklen if dklen >= 16 else 32}}
+    key = ks_key(sealing, ks_password(password))
     op = Cipher(algorithms.AES(key[:16]), modes.CTR(iv)).encryptor()
     message = op.update(secret) + op.finalize()
     crypto = {
@@ -522,10 +538,57 @@ def ks_make(mutation, kdf, cost, r, p, dklen, salt, iv, password, tried, secret)
         case "checksum":
             byte = int(crypto["checksum"]["message"][:2], 16) ^ 1
             crypto["checksum"]["message"] = f"{byte:02x}" + crypto["checksum"]["message"][2:]
-        case "cipher" if message:
-            crypto["cipher"]["message"] = f"{message[0] ^ 0x80:02x}" + message.hex()[2:]
+        case "cipher":
+            # One bit of the ciphertext, or one byte more where there is none.
+            changed = bytes([message[0] ^ 0x80]) + message[1:] if message else b"\x00"
+            crypto["cipher"]["message"] = changed.hex()
         case "version":
             store["version"] = 3
+        case "version5":
+            store["version"] = 5
+        case "versiontext":
+            store["version"] = "4"
+        case "nocrypto":
+            del store["crypto"]
+        case "nokdf" | "nochecksum" | "nocipher":
+            del crypto[mutation[2:]]
+        case "nosalt" | "nodklen":
+            del params[mutation[2:]]
+        case "noiv":
+            del crypto["cipher"]["params"]["iv"]
+        case "nocost":
+            del params["n" if kdf == "scrypt" else "c"]
+        case "dklentext":
+            params["dklen"] = str(dklen)
+        case "checksum31":
+            crypto["checksum"]["message"] = crypto["checksum"]["message"][2:]
+        case "checksum33":
+            crypto["checksum"]["message"] += "00"
+        case "iv17":
+            crypto["cipher"]["params"]["iv"] = iv.hex() + "00"
+        case "nothex":
+            params["salt"] = "zz" + params["salt"]
+        case "numdescription":
+            store["description"] = 5
+        case "numpubkey":
+            store["pubkey"] = 5
+        case "numpath":
+            store["path"] = 5
+        case "extra":
+            store["name"] = "an unknown field"
+            crypto["cipher"]["params"]["mode"] = "ctr"
+        case "cost0" if kdf == "pbkdf2":
+            params["c"] = 0
+        case "cost0":
+            params["n"] = 0
+        case "cost1" if kdf == "scrypt":
+            params["n"] = 1
+        case "cost3" if kdf == "scrypt":
+            params["n"] = 3 * cost
+        case "r0" if kdf == "scrypt":
+            params["r"] = 0
+        case "p0" if kdf == "scrypt":
+            params["p"] = 0
         case "upper":
             for name in ("checksum", "cipher"):
                 crypto[name]["message"] = crypto[name]["message"].upper()
@@ -553,7 +616,9 @@ def ks_make(mutation, kdf, cost, r, p, dklen, salt, iv, password, tried, secret)
             del crypto["checksum"]["params"]
         case "listparams":
             crypto["checksum"]["params"] = []
-    return json.dumps(store).encode(), ks_decrypt(store, tried)
+    expected = ks_decrypt(store, tried)
+    price = hashes_cost.cost(module, ks_password(tried)) if "crypto" in store else None
+    return json.dumps(store).encode(), expected, price or (0, 0)
 
 
 def opt(data):
@@ -573,6 +638,10 @@ def answer(w):
             return tohex(sha256(unhex(data)))
         case ["ripemd160", data]:
             return tohex(ripemd160(unhex(data)))
+        case ["filled", byte, count]:
+            # Both digests of one byte repeated, for a message too long to send.
+            data = bytes([int(byte)]) * int(count)
+            return f"{sha256(data).hex()} {ripemd160(data).hex()}"
         case ["crc32", data]:
             return str(zlib.crc32(unhex(data)))
         case ["crc32c", data]:
@@ -614,11 +683,19 @@ def answer(w):
         case ["scrypt", password, salt, n, r, p, length]:
             return opt(scrypt(unhex(password), unhex(salt), int(n), int(r), int(p), int(length)))
         case ["salsa208", block]:
-            return salsa208(unhex(block)).hex()
+            # RFC 7914 section 3 defines the core on 64 bytes.
+            return salsa208(unhex(block)).hex() if len(unhex(block)) == 64 else "error"
         case ["blockmix", data, r]:
+            # Section 4: `2 r` blocks of 64 bytes.
+            if int(r) < 1 or len(unhex(data)) != 128 * int(r):
+                return "error"
             return blockmix(unhex(data), int(r)).hex()
         case ["romix", data, n, r]:
-            return romix(unhex(data), int(n), int(r)).hex()
+            # Sections 2 and 5: `N` is a power of two above 1 and below `2^(128 r / 8)`.
+            n, r = int(n), int(r)
+            if r < 1 or len(unhex(data)) != 128 * r or n < 2 or n & (n - 1) or n >= 2 ** (16 * r):
+                return "error"
+            return romix(unhex(data), n, r).hex()
         case ["aes", key, block]:
             return aes_ecb(unhex(key), unhex(block)).hex()
         case ["aesinv", key, block]:
@@ -652,6 +729,14 @@ def answer(w):
         case ["ethash_sizes", block]:
             cache = ethash_size(int(block), 2**24, 2**17, 64)
             return f"{cache} {ethash_size(int(block), 2**30, 2**23, 128)}"
+        case ["ethash_epochs", first, count]:
+            # The sizes of consecutive epochs, as `cache:dataset` separated by spaces.
+            epochs = range(int(first), int(first) + int(count))
+            return " ".join(
+                f"{ethash_size(30000 * e, 2**24, 2**17, 64)}:"
+                f"{ethash_size(30000 * e, 2**30, 2**23, 128)}"
+                for e in epochs
+            )
         case ["ethash_seed", block]:
             return ethash_seed(int(block)).hex()
         case ["ethash_cache", n, seed]:
@@ -666,13 +751,13 @@ def answer(w):
             digest, result = hashimoto(cache, int(size), unhex(header), unhex(nonce))
             return digest.hex() + " " + result.hex()
         case ["ks", mutation, kdf, cost, r, p, dklen, salt, iv, password, tried, secret]:
-            store, expected = ks_make(
+            store, expected, (memory, work) = ks_make(
                 mutation, kdf, int(cost), int(r), int(p), int(dklen), unhex(salt),
                 unhex(iv), unhex(password).decode(), unhex(tried).decode(),
                 unhex(secret),
             )  # fmt: skip
-            return store.hex() + " " + opt(expected)
-    return "error unknown command"
+            return f"{store.hex()} {opt(expected)} {memory} {work}"
+    return hashes_aes.answer(w) or "error unknown command"
 
 
 def selftest():
