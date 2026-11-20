@@ -147,6 +147,8 @@ Each reference was then restored and compared with its copy.
 
 ### 1. BUG (stale data): Hoodi activates Glamsterdam at a time its sources withdrew
 
+Reported upstream as issue #3490.
+
 - Definition: `ChainConfig.hoodi`, `EthLib/Base/ChainConfig.lean:214`, the last activation, line 236: `(.glamsterdam, .time 1793036568)`.
 - Shrunk counterexample: block 0, timestamp 1793036568.
 - EthLib: `hoodi.activeFork 0 1793036568 = some glamsterdam`, and so for every later timestamp.

@@ -220,6 +220,7 @@ Three clients were then read at the head of their repositories on 2026-11-20, an
 
 `snap.md` of devp2p writes `[accHash: B_32, accBody: B]`, a byte string, and EthLib follows that text.
 So EthLib refuses the AccountRange that these clients send, and writes one that they refuse.
+Reported upstream as issue #3491.
 This is a BUG of interoperability, of the kind of the proof of no nodes in the first round: the text is not what the network speaks.
 
 ```lean
