@@ -1,0 +1,11 @@
+# The references of oracle/transition.py, beside oracle/requirements.txt (coincurve signs).
+# They are those of the EVM driver: see oracle/requirements-evm.txt for how to install them.
+#     .venv/bin/pip install --no-deps ethereum-execution==2.20.0
+ethereum-execution==2.20.0
+ethereum-types==0.4.1
+ethereum-rlp==0.1.7
+platformdirs==4.14.7
+typing-extensions==4.15.0
+# Glamsterdam: oracle/transition_amsterdam.py runs the branch forks/amsterdam of EELS, which
+# oracle/requirements-evm.txt installs under .venv/evm-amsterdam.
+# Without it the driver skips the two properties of Glamsterdam and says so.
