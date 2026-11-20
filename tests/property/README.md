@@ -29,34 +29,42 @@ lake exe base-property 20000
 ```
 
 A driver takes the number of cases as its argument.
-Most also take the name of a group, or a part of the name of a property, to run only those.
 `ETHLIB_ORACLE_PYTHON` names another interpreter for the oracles.
 
-The base driver also takes its selection from the environment, as lean-hedgehog reads it.
+Every driver takes its selection from the environment, as lean-hedgehog reads it.
 `HEDGEHOG_ONLY` holds parts of the names of the properties to run, separated by commas.
 `HEDGEHOG_RECHECK` holds the size and the two numbers of the seed that a failure report prints.
 The driver then runs that one case again.
+The consensus driver also takes the names of its groups as arguments.
 
 `oracle/requirements.txt` is enough for the base driver.
 Each other driver has `oracle/requirements-<layer>.txt`, which lists its references with their versions.
 Some say in a comment how to install a reference whose own dependencies do not resolve with the others.
 
-A property that found something is kept failing in a group of findings, so that a run shows the counterexample.
-Such a group does not change the exit code of its driver.
+A report lists the kinds of case that a property names, each with its share of the cases.
+A kind with a minimum fails the property when a long run stays under it, so a generator that stops reaching a rule fails the run.
+
+A property that found something is kept in a group of findings that must fail, so that a run shows the counterexample.
+The driver fails when such a property passes: the finding is gone, and the property moves to the passing group.
 
 ## Drivers
 
 | Driver | What it compares EthLib with |
 | --- | --- |
 | `base-property` | the Python standard library, and arithmetic on `Nat` and `Int` |
+| `kernels-property` | Python integers, py_ecc, and each constant table computed from its standard |
 | `serialization-property` | `ssz-specs`, remerkleable, the `rlp` package, `cryptography` for DER |
 | `hashes-property` | hashlib, `cryptography`, pycryptodome, crc32c |
 | `curves-property` | coincurve, eth-keys, OpenSSL, py_ecc, arkworks, milagro, c-kzg-4844 |
 | `networking-property` | cramjam, aioquic, noiseprotocol, and references written from the texts |
+| `decoders-property` | the `protobuf` package, aioquic, `cryptography`, and readers written from the texts |
 | `evm-property` | the Python execution-specs, at every fork they have |
 | `execution-property` | the Python execution-specs, eth-account, py-trie, eth-bloom |
+| `transition-property` | the Python execution-specs, on whole transactions and whole blocks |
+| `rpc-property` | the Python execution-specs, py-trie, and models written from execution-apis |
 | `consensus-property` | pyspec at the commit that `tests/sources.toml` pins |
 | `forkchoice-property` | the same pyspec, and a model of slashing protection from EIP-3076 |
+| `protocols-property` | the same pyspec, rebuilt at other presets, with real BLS |
 | `engine-property` | models written from execution-apis, and PyJWT |
 
 Each driver tests state in both ways that lean-hedgehog has: a state machine whose transitions are one type, and a scenario of commands that are each a type.

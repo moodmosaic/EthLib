@@ -9,7 +9,7 @@ cd tests/property
 .venv/bin/pip install -r oracle/requirements-forkchoice.txt
 lake build forkchoice-property
 lake exe forkchoice-property 1000
-ONLY=phase0 lake exe forkchoice-property 1000    # The properties whose name holds a word.
+HEDGEHOG_ONLY=phase0 lake exe forkchoice-property 1000    # The properties so named.
 ```
 
 No property found a place where EthLib computes something other than its source defines, apart from one documented and deliberate deviation (finding 1).
@@ -124,7 +124,7 @@ If the former, this is a BUG of the kind "an input refused that the source accep
 To see it again:
 
 ```bash
-ONLY="every vote" lake exe forkchoice-property 300
+HEDGEHOG_ONLY="every vote" lake exe forkchoice-property 300
 ```
 
 The main machine leaves these votes out of `on_attestation` (the oracle's `shape_ok` writes the shape rules of `process_attestation`), and still sends them through gossip.

@@ -29,6 +29,7 @@ open Hedgehog Support
 def main (args : List String) : IO UInt32 := do
   let cases := casesOf args
   let oracle ← Oracle.start "networking"
+  let selection ← Selection.fromEnv
   let ok ← checkGroup "networking" (NetworkingProperty.Snappy.passing oracle cases ++
     NetworkingProperty.Codecs.passing oracle cases ++
     NetworkingProperty.Records.passing oracle cases ++
@@ -36,8 +37,11 @@ def main (args : List String) : IO UInt32 := do
     NetworkingProperty.Gossip.passing oracle cases ++
     NetworkingProperty.Identity.passing oracle cases ++
     NetworkingProperty.Streams.passing cases ++
-    NetworkingProperty.Router.passing cases)
-  -- Each property of this group disagrees with a reference, and its report is the evidence.
-  let _ ← checkGroup "networking: findings" (NetworkingProperty.Snappy.findings oracle cases ++
-    NetworkingProperty.Gossip.findings oracle)
-  pure (if ok then 0 else 1)
+    NetworkingProperty.Router.passing cases) selection
+  -- Each property of this group disagrees with a reference, and must fail.
+  --
+  -- Its report is the evidence.
+  let findings ← checkGroup "networking: findings"
+    (NetworkingProperty.Snappy.findings oracle cases ++ NetworkingProperty.Gossip.findings oracle)
+    selection (mustFail := true)
+  pure (if ok && findings then 0 else 1)

@@ -89,6 +89,6 @@ def requestProperties (oracle : Oracle) (cases : Nat) : List (String × Property
     requestProperty oracle "a withdrawal request on a large registry"
       "process_withdrawal_request" ((operations.find? (·.name = "process_withdrawal_request")).map
         (·.arguments) |>.getD (pure [])) 15).map
-    fun (name, p) => (name, p.withTests cases)
+    fun (name, p) => (name, (p.withCoverFrom 300).withTests cases)
 
 end ConsensusProperty

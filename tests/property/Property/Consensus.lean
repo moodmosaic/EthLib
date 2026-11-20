@@ -28,7 +28,9 @@ def main (args : List String) : IO UInt32 := do
   let scenarios ← allForks.mapM fun (forkName, fork) => do
     let chaos ← blockScenario oracle forkName fork .madhouse
     let script ← blockScenario oracle forkName fork .deterministic
-    pure [(s!"the operations of a block in any order, {forkName}", chaos.withTests cases),
+    -- A short run has only short sequences, so a minimum is asked from 300 of them.
+    pure [(s!"the operations of a block in any order, {forkName}",
+        (chaos.withCoverFrom 300).withTests cases),
       (s!"the operations of a block in order, {forkName}", script)]
   let groups : List (String × List (String × Property IO)) := [
     ("pure", pureProperties oracle cases),
@@ -50,7 +52,7 @@ def main (args : List String) : IO UInt32 := do
     ("blocks-gloas", (callProperties oracle cases genOperationState gloasBlocks ++
       callProperties oracle cases genLargeState gloasBlocks).zipIdx.map fun ((name, p), i) =>
         (name ++ (if i = 0 then ", from Gloas" else ", from Gloas, a large registry"),
-          changing 5 p)),
+          (changing 5 p).withCoverFrom 300)),
     ("accessors", callProperties oracle cases genOperationState accessors),
     ("mutators", callProperties oracle cases genOperationState mutators),
     ("upgrades", callProperties oracle cases genUpgradeState upgrades)]
@@ -58,13 +60,14 @@ def main (args : List String) : IO UInt32 := do
   let names := groups.map (·.1)
   let wantedGroups := wanted.filter names.contains
   let wantedParts := wanted.filter (!names.contains ·)
+  let selection ← Selection.fromEnv
   let mut ok := true
   for (name, properties) in groups do
     let whole := wanted.isEmpty || wantedGroups.contains name
     let properties := properties.filter fun (label, _) =>
       whole || wantedParts.any fun part => (label.splitOn part).length > 1
     if !properties.isEmpty then
-      ok := (← checkGroup s!"consensus: {name}" properties) && ok
+      ok := (← checkGroup s!"consensus: {name}" properties selection) && ok
       -- How often the reference accepted, left unchanged, refused and skipped.
       --
       -- A group that only refuses tests little.

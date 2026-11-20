@@ -16,7 +16,7 @@ path = "../.."
 [[require]]
 name = "hedgehog"
 git = "https://github.com/hedgehogqa/lean-hedgehog"
-rev = "46a4146a3b9220b44319dd0055348ffaada0e604"
+rev = "080ecaffcf45a5c3a3f6e57a281fbe51e9fdbf73"
 
 # What every driver shares: generators, hexadecimal, the oracle process.
 [[lean_lib]]
