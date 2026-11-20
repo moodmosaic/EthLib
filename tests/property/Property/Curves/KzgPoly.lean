@@ -55,6 +55,12 @@ def samePoly (a b : List Nat) : Bool :=
 def arithmetic : Property IO := pureIO do
   let (a, b) ← forAll (Gen.zip (genPoly (.linear 0 12)) (genPoly (.linear 0 12)))
   let z ← forAll genCoeff
+  classify "the first is longer" (a.length > b.length)
+  classify "the second is longer" (a.length < b.length)
+  classify "the two have one length" (a.length == b.length)
+  classify "the first is empty" a.isEmpty
+  classify "the second is empty" b.isEmpty
+  classify "the point is zero" (z == 0)
   ofFr (addPolynomialcoeff (toFr a) (toFr b)) === addModel a b
   (multiplyPolynomialcoeff (toFr a) (toFr b)).toOption.map ofFr === some (mulModel a b)
   (evaluatePolynomialcoeff (toFr a) (Fr.ofNat z)).val === horner a z
@@ -66,6 +72,10 @@ def productBound : Property IO := pureIO do
     (Gen.element [0, 1, 4095, 4096, 4097]))
   let a := Array.replicate m Fr.zero
   let b := Array.replicate n Fr.one
+  classify "the sizes sum to exactly 8192, the last accepted" (m + n == 8192)
+  classify "the sizes sum to 8193, the first refused" (m + n == 8193)
+  classify "accepted" (m + n ≤ 8192)
+  classify "refused" (m + n > 8192)
   (multiplyPolynomialcoeff a b).toOption.isSome === decide (m + n ≤ 8192)
 
 /-- Division inverts the product: `(q b + rest) / b = q`, for `rest` shorter than `b`.
@@ -79,6 +89,10 @@ def division : Property IO := pureIO do
   let a := addModel (mulModel q b) rest
   -- The product has the length of `q` plus that of `b`, less one, as the division expects.
   let a := a.take (q.length + b.length - 1)
+  classify "divided" (lead != 0)
+  classify "refused: the divisor ends in zero" (lead == 0)
+  classify "the divisor is a constant" (b.length == 1)
+  classify "the remainder is zero" (rest.all (· == 0))
   match dividePolynomialcoeff (toFr a) (toFr b) with
   | .ok out => ensure (lead != 0 && ofFr out == q) s!"the quotient is {ofFr out}"
   | .error _ => lead === 0
@@ -97,6 +111,10 @@ The vanishing polynomial is monic and zero at each point. -/
 def interpolation : Property IO := pureIO do
   let xs ← forAll (genPoints (.linear 0 10))
   let ys ← forAll (Gen.list (.singleton xs.length) genCoeff)
+  classify "no point" xs.isEmpty
+  classify "one point" (xs.length == 1)
+  classify "several points" (xs.length > 1)
+  classify "the point zero among them" (xs.contains 0)
   match interpolatePolynomialcoeff (toFr xs) (toFr ys) with
   | .ok poly =>
     let p := ofFr poly
@@ -133,8 +151,11 @@ def domains : Property IO := pureIO do
   roots[i]!.val === modPow r 7 ((r - 1) / order * i)
   (rootsOfUnityBrp order)[i]!.val === modPow r 7 ((r - 1) / order * reverseModel i order.log2)
   -- A coset of a cell is a block of 64 points of the bit-reversed domain of 8192.
-  let cell ← forAll (Gen.frequency [(4, Gen.nat (.constant 0 127)),
+  let cell ← forAll (Gen.frequency [(4, Gen.nat (.constant 0 127)), (1, Gen.element [0, 127]),
       (1, Gen.element [128, 129, 8192])])
+  label s!"roots of order {order}"
+  classify "the cell index 0 or 127" (cell == 0 || cell == 127)
+  classify "refused: a cell index of 128 or more" (cell ≥ 128)
   match cosetForCell cell with
   | .ok coset =>
     ensure (cell < 128) "a cell index of 128 or more has a coset"
@@ -148,6 +169,7 @@ def fft : Property IO := pureIO do
   let n := 2 ^ k
   let vals ← forAll (Gen.list (.singleton n) genCoeff)
   let roots := computeRootsOfUnity n
+  label s!"{n} values"
   let out := fftField (toFr vals) roots
   let w := modPow r 7 ((r - 1) / n)
   ofFr out === (List.range n).map fun i =>
@@ -167,6 +189,12 @@ def evaluationForm : Property IO := pureIO do
   let domain := rootsOfUnityBrp 4096
   let values := (domain.map fun d => Fr.ofNat (horner p d.val)).extract 0 short
   let values := values ++ Array.replicate (short - values.size) Fr.zero
+  classify "the point is in the domain, so the value is an entry" (modPow r z 4096 == 1)
+  classify "the point is outside the domain, the barycentric formula" (modPow r z 4096 != 1 &&
+    short == 4096)
+  classify "the point is zero" (z == 0)
+  classify "refused: not 4096 values" (short != 4096)
+  classify "the polynomial is zero" (p.all (· == 0))
   match evaluatePolynomialInEvaluationForm values (Fr.ofNat z) with
   | .ok y =>
     short === 4096
@@ -179,10 +207,14 @@ def evaluationForm : Property IO := pureIO do
 
 /-- The polynomial of a cell takes the cell's values on its coset. -/
 def cosets : Property IO := pureIO do
-  let cell ← forAll (Gen.nat (.constant 0 127))
+  let cell ← forAll (Gen.frequency [(4, Gen.nat (.constant 0 127)), (1, Gen.element [0, 127])])
   let evals ← forAll (Gen.list (.singleton 64) genCoeff)
   let short ← forAll (Gen.frequency [(8, pure 64), (1, pure 63), (1, pure 65)])
   let .ok coset := cosetForCell cell | failWith "no coset"
+  classify "64 values" (short == 64)
+  classify "refused: 63 values" (short == 63)
+  classify "refused: 65 values" (short == 65)
+  classify "the cell index 0 or 127" (cell == 0 || cell == 127)
   match interpolateCosetEvals coset[0]! ((toFr evals).extract 0 short ++
       Array.replicate (short - 64) Fr.zero) with
   | .ok poly =>
@@ -196,6 +228,10 @@ def indices : Property IO := pureIO do
   let extra ← forAll (Gen.nat (.constant 0 9))
   let bytes := values.foldl (fun acc v => acc ++ beBytes 8 v) ByteArray.empty ++
     ⟨Array.replicate extra 0⟩
+  classify "decoded" (extra % 8 == 0)
+  classify "decoded: no index" (extra == 0 && values.isEmpty)
+  classify "refused: a ragged buffer" (extra % 8 != 0)
+  classify "an index of 2^63 or more" (values.any (· ≥ 2 ^ 63))
   match unpackIndicesBE bytes with
   | .ok out =>
     ensure (extra % 8 == 0) "a ragged buffer is accepted"

@@ -34,6 +34,14 @@ def sigOf (k : Nat) (msg : ByteArray) : ByteArray :=
 def secretKeys (oracle : Oracle) : Property IO := propertyM do
   let k ← forAll (genNear r)
   let len ← forAll (Gen.frequency [(8, pure 32), (1, pure 31), (1, pure 33), (1, pure 0)])
+  classify "32 bytes of a number in [1, r - 1], accepted" (len == 32 && 0 < k && k < r)
+  classify "refused: zero" (len == 32 && k == 0)
+  classify "refused: exactly r" (len == 32 && k == r)
+  classify "refused: above r" (len == 32 && k > r)
+  classify "refused: 31 bytes" (len == 31)
+  classify "refused: 33 bytes" (len == 33)
+  classify "refused: no byte" (len == 0)
+  classify "the key is 1 or r - 1" (len == 32 && (k == 1 || k + 1 == r))
   pure do
     let bytes := beBytes len k
     match SecretKey.fromBytes bytes with
@@ -44,8 +52,14 @@ def secretKeys (oracle : Oracle) : Property IO := propertyM do
 
 /-- Signing is `SK * H(message)`, as py_ecc and milagro sign. -/
 def signs (oracle : Oracle) : Property IO := propertyM do
-  let k ← forAll (genScalar r)
-  let msg ← forAllWith hex (genBytes (.linear 0 100))
+  let k ← forAll (Gen.frequency [(1, Gen.element [1, 2, r - 1]), (4, genScalar r)])
+  -- 55 bytes is the longest message whose first block of the expansion holds it whole.
+  let msg ← forAllWith hex (Gen.frequency [(1, pure ByteArray.empty),
+    (3, genBytes (.constant 1 55)), (3, genBytes (.constant 56 200))])
+  classify "message empty" (msg.size == 0)
+  classify "message of 1 to 55 bytes" (0 < msg.size && msg.size ≤ 55)
+  classify "message above 55 bytes" (msg.size > 55)
+  classify "the key is 1 or r - 1" (k == 1 || k + 1 == r)
   pure do
     hex (sigOf k msg) === (← oracle.ask ["blssign", toString k, hex msg])
     match secret k with
@@ -74,6 +88,24 @@ def genBadSig (good : ByteArray) : Gen ByteArray :=
     (1, pure ⟨(G2.compress (G2.neg ((G2.uncompress
         (vec 96 good)).toOption.getD G2.zero))).toArray⟩)]
 
+/-- The first rule of the core verification that refuses, in the order of the draft, for a label.
+
+The signature is decoded and checked first, then the key. -/
+def coreRefusal (pk sig : ByteArray) : String :=
+  if sig.size != 96 then "the signature is not 96 bytes" else
+  match G2.uncompress (vec 96 sig) with
+  | .error _ => "the signature does not decode"
+  | .ok point =>
+    if !G2.inSubgroup point then "the signature is outside the subgroup"
+    else if pk.size != 48 then "the key is not 48 bytes" else
+    match G1.uncompress (vec 48 pk) with
+    | .error _ => "the key does not decode"
+    | .ok key =>
+      if key.isInfinity then "the key is the point at infinity"
+      else if !G1.inSubgroup key then "the key is outside the subgroup"
+      else if point.isInfinity then "the pairing, with the signature at infinity"
+      else "the pairing"
+
 /-- Verification accepts what py_ecc and milagro accept.
 
 The key, the message or the signature is changed at one place. -/
@@ -85,11 +117,18 @@ def verifies (oracle : Oracle) : Property IO := propertyM do
   let msg' ← forAllWith hex (Gen.frequency [(5, pure msg), (1, genBytes (.linear 0 40))])
   pure do
     let got := verify (vec 48 pk) msg' (vec 96 sig)
+    classify "accepted" got
+    if !got then label s!"refused: {coreRefusal pk sig}"
+    classify "refused with a key and a signature that are valid points" (!got &&
+      coreRefusal pk sig == "the pairing")
+    classify "the message is another one" (msg' != msg)
     (if got then "1" else "0") === (← oracle.ask ["blsverify", hex pk, hex msg', hex sig])
     let proof := match secret k with
       | some sk => (popProve sk).toOption.map (fun (v : BLSSignature) => ByteArray.mk v.toArray)
       | none => none
     let proof := if sig.size == 96 && sig != sigOf k msg then sig else proof.getD sig
+    classify "proof of possession: accepted" (popVerify (vec 48 pk) (vec 96 proof))
+    classify "proof of possession: refused" (!popVerify (vec 48 pk) (vec 96 proof))
     (if popVerify (vec 48 pk) (vec 96 proof) then "1" else "0") ===
       (← oracle.ask ["popverify", hex pk, hex proof])
 
@@ -97,13 +136,30 @@ def verifies (oracle : Oracle) : Property IO := propertyM do
 
 It refuses an empty list and a signature that does not decode. -/
 def aggregates (oracle : Oracle) : Property IO := propertyM do
-  let sigs ← forAllWith (fun ss => toString (ss.map hex)) (Gen.list (.linear 0 5) (do
+  let one : Gen ByteArray := do
     let k ← genScalar r
-    genBadSig (sigOf k (beBytes 4 k))))
+    genBadSig (sigOf k (beBytes 4 k))
+  -- Two signatures of one message under opposite keys sum to the point at infinity.
+  let opposite : Gen (List ByteArray) := do
+    let k ← genScalar r
+    pure [sigOf k (beBytes 1 7), sigOf (r - k) (beBytes 1 7)]
+  let sigs ← forAllWith (fun ss => toString (ss.map hex)) (Gen.frequency [
+    (1, pure []), (2, Gen.list (.constant 1 1) one), (6, Gen.list (.constant 2 5) one),
+    (1, opposite), (1, (fun pair extra => pair ++ [extra]) <$> opposite <*> one)])
   pure do
     let got := match aggregate (sigs.map (vec 96)).toArray with
       | .ok sig => hexVec sig
       | .error _ => "error"
+    let points := sigs.map fun sig => (G2.uncompress (vec 96 sig)).toOption
+    classify "refused: no signature" sigs.isEmpty
+    classify "refused: a signature does not decode" (points.any Option.isNone)
+    classify "aggregated" (got != "error")
+    classify "aggregated one signature" (got != "error" && sigs.length == 1)
+    classify "aggregated with a point at infinity" (got != "error" &&
+      points.any fun pt => pt.any (·.isInfinity))
+    classify "aggregated with a point outside the subgroup" (got != "error" &&
+      points.any fun pt => pt.any (!G2.inSubgroup ·))
+    classify "the aggregate is the point at infinity" (got == hexVec G2.infinityBytes)
     got === (← oracle.ask ["aggregate", listWord (sigs.map hex)])
 
 /-- Signers of one message, or of several, with their aggregate signature. -/
@@ -115,9 +171,11 @@ instance : Repr Signers := ⟨fun s _ => repr (s.keys, s.msgs.map hex)⟩
 
 /-- A few signers; a key or a message is often repeated, and keys may sum to zero. -/
 def genSigners : Gen Signers := do
-  let keys ← Gen.list (.linear 0 4)
-    (Gen.frequency [(1, Gen.nat (.constant 1 3)), (2, genScalar r)])
-  let keys ← Gen.frequency [(6, pure keys), (1, pure (keys ++ keys.map fun k => r - k))]
+  let key := Gen.frequency [(1, Gen.nat (.constant 1 3)), (2, genScalar r)]
+  -- The length does not follow the size: a short run would have no signer at all.
+  let keys ← Gen.frequency [(1, pure []), (3, Gen.list (.constant 1 1) key),
+    (8, Gen.list (.constant 2 4) key)]
+  let keys ← Gen.frequency [(5, pure keys), (2, pure (keys ++ keys.map fun k => r - k))]
   let msgs ← Gen.frequency [
     (1, pure (keys.map fun _ => ByteArray.empty)),
     (2, keys.mapM fun _ => genBytes (.linear 0 8)),
@@ -142,6 +200,18 @@ def aggregateVerifies (oracle : Oracle) : Property IO := propertyM do
     let pks := if badKey then pks.map fun _ => ByteArray.mk G1.infinityBytes.toArray else pks
     let msgs := signers.msgs.drop drop
     let got := coreAggregateVerify pks.toArray msgs.toArray sig DST
+    classify "accepted" got
+    classify "accepted with a message twice" (got && (msgs.map hex).eraseDups.length < msgs.length)
+    classify "accepted with one signer" (got && pks.length == 1)
+    classify "refused: no signer" pks.isEmpty
+    classify "refused: fewer messages than keys" (!pks.isEmpty && pks.length != msgs.length)
+    classify "refused: a key at infinity" (badKey && !pks.isEmpty)
+    classify "refused: the signature changed" (!got && sig != good && !pks.isEmpty)
+    classify "refused: honest inputs" (!got && sig == good && !badKey && drop == 0 &&
+      !pks.isEmpty)
+    classify "accepted with keys that sum to the point at infinity" (got &&
+      signers.keys.foldl (· + ·) 0 % r == 0)
+    classify "accepted with two signers or more" (got && pks.length ≥ 2)
     (if got then "1" else "0") === (← oracle.ask
       ["aggverify", listWord (pks.map hex), listWord (msgs.map hex), hex sig])
     if !badKey && drop == 0 then
@@ -162,6 +232,18 @@ def fastAggregateVerifies (oracle : Oracle) : Property IO := propertyM do
   pure do
     let pks := (keys.map (vec 48)).toArray
     let words := [listWord (keys.map hex), hex msg, hex sig]
+    let got := fastAggregateVerify pks msg (vec 96 sig)
+    let eth := ethFastAggregateVerify pks msg (vec 96 sig)
+    classify "accepted" got
+    classify "no key, and the signature at infinity: Ethereum accepts, the draft refuses"
+      (eth && !got)
+    classify "no key, and another signature: both refuse" (keys.isEmpty && !eth)
+    classify "refused: a key fails validation" (!keys.isEmpty &&
+      (ethAggregatePubkeys pks).toOption.isNone)
+    classify "refused: the keys sum to the point at infinity" (!keys.isEmpty &&
+      (ethAggregatePubkeys pks).toOption == some G1.infinityBytes)
+    classify "refused: the signature changed" (!got && !keys.isEmpty && sig != good)
+    classify "one key" (keys.length == 1)
     (if fastAggregateVerify pks msg (vec 96 sig) then "1" else "0") ===
       (← oracle.ask ("fastaggverify" :: words))
     (if ethFastAggregateVerify pks msg (vec 96 sig) then "1" else "0") ===
@@ -177,6 +259,10 @@ def keyGens (oracle : Oracle) : Property IO := propertyM do
     (1, genBytes (.linear 0 31)), (1, pure (beBytes 32 0))])
   let info ← forAllWith hex (Gen.frequency [(2, pure ByteArray.empty), (1, genBytes
       (.linear 0 40))])
+  classify "refused: fewer than 32 bytes" (ikm.size < 32)
+  classify "exactly 32 bytes" (ikm.size == 32)
+  classify "more than 32 bytes" (ikm.size > 32)
+  classify "key info given" (info.size > 0)
   pure do
     let got := match keyGen ikm info with
       | .ok sk => toString sk.val.val
@@ -192,22 +278,37 @@ def genIndex : Gen UInt32 :=
 def derives (oracle : Oracle) : Property IO := propertyM do
   let seed ← forAllWith hex (Gen.frequency [(6, genBytes (.linear 32 64)), (1, genBytes
       (.linear 0 31))])
-  let path ← forAll (Gen.list (.linear 0 3) genIndex)
+  let path ← forAll (Gen.list (.constant 0 3) genIndex)
+  classify "refused: a seed below 32 bytes" (seed.size < 32)
+  classify "the master key, no index" path.isEmpty
+  classify "one index" (path.length == 1)
+  classify "two or three indices" (path.length ≥ 2)
+  classify "an index of 2^31 or more" (path.any (·.toNat ≥ 2 ^ 31))
+  classify "the index 2^32 - 1" (path.any (·.toNat == 2 ^ 32 - 1))
+  classify "the index 0" (path.any (·.toNat == 0))
   pure do
     let got := match KeyDerivation.derivePath seed path with
       | .ok sk => toString sk.val.val
       | .error _ => "error"
     got === (← oracle.ask ("derivepath" :: hex seed :: path.map fun i => toString i.toNat))
 
-/-- A path text of ERC-2334, valid or changed at one place. -/
+/-- A path text of ERC-2334, valid or changed at one place.
+
+Half of the texts are valid, so that the accepting branch and its fields are read often. -/
 def genPathText : Gen String := do
-  let indices ← Gen.list (.linear 0 7) (Gen.frequency [
-    (4, (fun i : UInt32 => toString i.toNat) <$> genIndex),
-    (1, pure "12381"), (1, pure "4294967296"), (1, pure "012381"), (1, pure ""),
-    (1, pure "1'"), (1, pure " 1"), (1, pure "-1"), (1, pure "0x1"), (1, pure "١")])
-  let indices ← Gen.frequency [(3, pure ("12381" :: indices)), (1, pure indices)]
-  let root ← Gen.frequency [(8, pure "m"), (1, pure "M"), (1, pure ""), (1, pure "m ")]
-  pure ("/".intercalate (root :: indices))
+  let index := (fun i : UInt32 => toString i.toNat) <$> genIndex
+  let bad := Gen.frequency [
+    (3, Gen.element ["4294967296", "4294967297", "18446744073709551616"]),
+    (1, pure "4294967295"),
+    (4, Gen.element ["012381", "", "1'", " 1", "-1", "0x1", "١", "1 ", "+1"])]
+  let spoil ← Gen.frequency [(5, pure false), (4, pure true)]
+  let indices ← Gen.list (.constant 0 6) (if spoil then Gen.frequency [(5, index), (1, bad)]
+    else index)
+  -- The purpose is 12381, or another number, or missing.
+  let purpose ← Gen.frequency [(12, pure ["12381"]), (1, pure []), (1, pure ["12380"]),
+    (1, pure ["12382"]), (1, pure ["012381"])]
+  let root ← Gen.frequency [(14, pure "m"), (1, pure "M"), (1, pure ""), (1, pure "m ")]
+  pure ("/".intercalate (root :: purpose ++ indices))
 
 /-- The model of a path: `m`, then four or more decimal indices below `2 ^ 32`, the first 12381. -/
 def pathModel (text : String) : Option (List Nat) :=
@@ -224,10 +325,22 @@ def pathModel (text : String) : Option (List Nat) :=
 /-- The parser of key paths accepts the paths of ERC-2334 and writes them back. -/
 def paths : Property IO := pureIO do
   let text ← forAll genPathText
+  let parts := text.splitOn "/"
+  classify "accepted" (pathModel text).isSome
+  classify "accepted with exactly four indices" ((pathModel text).any (·.length == 4))
+  classify "accepted with the index 2^32 - 1" ((pathModel text).any (·.contains (2 ^ 32 - 1)))
+  classify "an index with a leading zero" (parts.tail.any fun part =>
+    part.length > 1 && part.startsWith "0" && part.all fun c => '0' ≤ c && c ≤ '9')
   match KeyPath.parsePath text with
   | .ok path =>
     some (path.indices.map (·.toNat)) === pathModel text
     (KeyPath.parsePath path.toString).toOption === some path
-  | .error _ => pathModel text === none
+  | .error e =>
+    label s!"refused: {ctorName e}"
+    pathModel text === none
+  -- The two paths of a validator, as ERC-2334 writes them under "Validator keys".
+  let index ← forAll genIndex
+  (KeyPath.withdrawalPath index).toString === s!"m/12381/3600/{index.toNat}/0"
+  (KeyPath.signingPath index).toString === s!"m/12381/3600/{index.toNat}/0/0"
 
 end CurvesProperty.Bls12

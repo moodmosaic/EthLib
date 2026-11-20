@@ -22,6 +22,10 @@ def montgomery : Property IO := pureIO do
   let (a, b) ← forAll (Gen.zip (genNear p) (genNear p))
   let (x, y) : Secp256k1.Fp.Montgomery × Secp256k1.Fp.Montgomery :=
     (Montgomery.ofNat a, Montgomery.ofNat b)
+  classify "a is p or more, so it is reduced" (a ≥ p)
+  classify "a is zero mod p" (a % p == 0)
+  classify "a + b is p or more" (a % p + b % p ≥ p)
+  classify "a is below b, so the difference borrows" (a % p < b % p)
   x.toNat === a % p
   (x + y).toNat === (a + b) % p
   (x - y).toNat === (a % p + p - b % p) % p
@@ -40,10 +44,16 @@ The read gives nothing for a number of `p` or more. -/
 def montgomeryBytes : Property IO := pureIO do
   let p := Secp256k1.Fp.modulus
   let a ← forAll (genNear p)
-  let (before, cut) ← forAll (Gen.zip (Gen.nat (.linear 0 5)) (Gen.nat (.linear 0 34)))
+  -- The number is whole in three cases of four; a buffer that ends early reads zeros there.
+  let (before, cut) ← forAll (Gen.zip (Gen.nat (.linear 0 5))
+    (Gen.frequency [(3, Gen.nat (.constant 32 34)), (1, Gen.nat (.constant 0 31))]))
   let bytes := (ByteArray.mk (Array.replicate before 0xff) ++ beBytes 32 a).extract 0 (before + cut)
   let read : Option Secp256k1.Fp.Montgomery := Montgomery.ofBytesBE bytes before
   let value := beNat (bytes.extract before (before + 32)) * 256 ^ (32 - min cut 32)
+  classify "read: a number below p" (value < p)
+  classify "refused: exactly p" (value == p)
+  classify "refused: above p" (value > p)
+  classify "the buffer ends before the 32 bytes" (cut < 32)
   read.map (·.toNat) === (if value < p then some value else none)
 
 /-- The extended Euclidean coefficient times `a` is the gcd, mod any modulus. -/
@@ -56,6 +66,10 @@ def inverse : Property IO := pureIO do
   if h : m = 0 then discard else
     have : NeZero m := ⟨h⟩
     let x : Fin m := Fin.ofNat m a
+    classify "coprime, so an inverse" (Nat.gcd x.val m == 1)
+    classify "not coprime, so no inverse" (Nat.gcd x.val m != 1)
+    classify "zero" (x.val == 0)
+    classify "the modulus is 1" (m == 1)
     let inv := Fin.inverse x
     (inv.val * x.val) % m === Nat.gcd x.val m % m
 
@@ -101,6 +115,13 @@ def jacobianOn (q : Nat) [NeZero q] : Property IO := pureIO do
   let (k, l) ← forAll (Gen.zip (Gen.nat (.linear 0 300)) (Gen.nat (.linear 0 300)))
   let (z1, z2) ← forAll (Gen.zip (Gen.nat (.constant 1 (q - 1))) (Gen.nat (.constant 1 (q - 1))))
   let fa : Fin q := Fin.ofNat q a
+  classify "P = Q, a doubling" (p1 == p2 && p1.isSome)
+  classify "P = -Q, the point at infinity" (p1.isSome && modelAdd q a p1 p2 == none)
+  classify "P is at infinity" p1.isNone
+  classify "Q is at infinity" p2.isNone
+  classify "P has order two" (p1.any fun (_, y) => y == 0)
+  classify "a = 0" (a == 0)
+  classify "the scalar is zero" (k == 0)
   -- The form `(x z^2, y z^3, z)` of a point, for any `z` but zero.
   let form (pt : Affine) (z : Nat) : Jacobian q :=
     match pt with

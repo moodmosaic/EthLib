@@ -80,4 +80,67 @@ def flipVec {n : Nat} (v : Vector UInt8 n) (pick : Nat) : Vector UInt8 n :=
       omega
     v.set (bit / 8) (v[bit / 8] ^^^ (1 <<< UInt8.ofNat (bit % 8)))
 
+/-- Ask the oracle outside a test, where a driver prepares its inputs. -/
+def askIO (oracle : Oracle) (words : List String) : IO String := do
+  oracle.stdin.putStrLn ("\t".intercalate words)
+  oracle.stdin.flush
+  pure (String.ofList ((← oracle.stdout.getLine).toList.filter (· ≠ '\n')))
+
+/-- Inputs that only a search finds, which the oracle makes once for a run.
+
+A generator is pure, so it cannot ask for them. -/
+structure Specials where
+  /-- Compressed points of the twist of BLS12-381 whose `y` is real. -/
+  realY : List ByteArray
+  /-- The `u` that the map to `G1` sends to the kernel of the 11-isogeny. -/
+  kernelG1 : List Nat
+  /-- Points of the twist of alt_bn128 outside its subgroup, each as four coordinates. -/
+  bnTwist : List (List Nat)
+
+/-- Ask the oracle for the special inputs. -/
+def Specials.load (oracle : Oracle) : IO Specials := do
+  let mut realY := #[]
+  for y in List.range 60 do
+    if realY.size < 8 then
+      match unhex? (← askIO oracle ["g2real", toString (y + 1)]) with
+      | some bytes => if bytes.size == 96 then realY := realY.push bytes
+      | none => pure ()
+  let kernel := ((← askIO oracle ["swuroot", "g1"]).splitOn " ").filterMap String.toNat?
+  let mut twist := #[]
+  for seed in [1, 3, 1000, 4096, 10 ^ 9, 2 ^ 200] do
+    let coordinates := ((← askIO oracle ["bntwist", toString seed]).splitOn ",").filterMap
+      String.toNat?
+    if coordinates.length == 4 then twist := twist.push coordinates
+  if realY.isEmpty || kernel.isEmpty || twist.isEmpty then
+    throw (IO.userError "the oracle found no special input")
+  pure ⟨realY.toList, kernel, twist.toList⟩
+
+/-- The name of the constructor that `Repr` shows first, for a label. -/
+def ctorName {α : Type} [Repr α] (x : α) : String :=
+  let word := String.ofList ((reprStr x).toList.dropWhile (· == '(') |>.takeWhile fun c =>
+    c.isAlphanum || c == '.')
+  (word.splitOn ".").getLastD word
+
+/-- Where a number lies against a modulus: the classes that a range check splits. -/
+def rangeClass (modulus x : Nat) : String :=
+  if x == 0 then "zero"
+  else if x < modulus then "inside"
+  else if x == modulus then "the modulus"
+  else "above the modulus"
+
+/-- The property with minimums of its shares, asked only of a run of 500 cases or more.
+
+A run starts at size 0 and grows by one, so a short run has small cases and other shares.
+
+Each minimum is about a third of the share seen at 1,000 cases. -/
+def withMinimums (cases : Nat) (minimums : List (Nat × String)) (p : Property IO) :
+    Property IO :=
+  if cases < 500 then p else
+  { p with test := do
+      let test ← p.test
+      pure do
+        test
+        for (minimum, name) in minimums do
+          cover minimum name false }
+
 end CurvesProperty

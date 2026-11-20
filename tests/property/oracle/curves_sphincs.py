@@ -2,8 +2,8 @@
 
 #     Th(PK.seed, ADRS, M) = Trunc_16(Keccak-256(PK.seed | ADRS | M))
 #
-# An address is eight big-endian 32-bit words: layer, tree (three words), type, key pair,
-# and two words that the type gives a meaning to.
+# An address is eight big-endian 32-bit words.
+# They are the layer, the tree (three words), the type, the key pair and two that the type names.
 
 from Crypto.Hash import keccak
 

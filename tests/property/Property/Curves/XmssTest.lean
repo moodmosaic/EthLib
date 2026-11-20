@@ -78,7 +78,11 @@ def genChange : Gen Change :=
   Gen.frequency [
     (2, pure .none),
     (4, .sigBit <$> Gen.nat (.constant 0 (8 * 2404 - 1))),
-    (4, Gen.zipWith .sigField (Gen.nat (.constant 0 148)) (Gen.nat (.constant 0 127))),
+    -- A field by its kind first: the index, a randomizer, a chain value or a sibling.
+    (5, Gen.zipWith .sigField (Gen.frequency [(1, pure 0), (4, Gen.element [1, 76]),
+      (2, Gen.nat (.constant 2 59)), (2, Gen.nat (.constant 77 134)),
+      (2, Gen.nat (.constant 60 75)), (2, Gen.nat (.constant 135 150))])
+      (Gen.nat (.constant 0 127))),
     (2, .msgBit <$> Gen.nat (.constant 0 255)),
     (2, .pkBit <$> Gen.nat (.constant 0 255)),
     (2, .index <$> Gen.frequency [(1, Gen.nat (.linear 0 3)), (1, pure (2 ^ 32 - 1)),
@@ -114,6 +118,27 @@ def Change.apply (s : Signed) : Change → Signed
   | .msgSize delta => { s with msg := resize s.msg delta }
   | .pkSize delta => { s with pk := resize s.pk delta }
 
+/-- The name of a change, for a label. -/
+def Change.name : Change → String
+  | .none => "nothing"
+  | .sigBit _ => "any bit of the signature"
+  | .sigField field _ =>
+    let start := fieldStarts[field % fieldStarts.length]!
+    let base := if start ≥ 1204 then 1204 else 4
+    let layer := if start ≥ 1204 then "top" else "bottom"
+    if start == 0 then "a bit of the leaf index"
+    else if start == base then s!"a bit of the {layer} randomizer"
+    else if start < base + 944 then s!"a bit of a {layer} chain value"
+    else s!"a bit of a {layer} sibling"
+  | .msgBit _ => "a bit of the message"
+  | .pkBit bit => if bit < 128 then "a bit of the root" else "a bit of the public parameter"
+  | .index _ => "the leaf index"
+  | .swapLayers => "the two layers exchanged"
+  | .swapChains _ _ => "two chain values exchanged"
+  | .sigSize _ => "the length of the signature"
+  | .msgSize _ => "the length of the message"
+  | .pkSize _ => "the length of the key"
+
 /-- Verification accepts a valid signature.
 
 It agrees with the model on every signature changed at one place.
@@ -126,6 +151,24 @@ def verifies (oracle : Oracle) (vectors : List Signed) : Property IO := property
   pure do
     let s := change.apply base
     let got := verdict s
+    label s!"changed: {change.name}"
+    label s!"vector {validNames[which]!}"
+    classify "accepted" (got == "1")
+    classify "refused: a wrong length" (got == "error")
+    -- Which step of verification refuses, by the roots that the two layers lead to.
+    match decodePublicKey s.pk, decodeSignature s.sig with
+    | .ok pk, .ok sig =>
+      if h : s.msg.size = 32 then
+        let bottom := (layerRoot hashId pk.publicParam .bottom sig.leafIndex.toNat s.msg
+          sig.bottom).run
+        let top := bottom.bind fun root => (layerRoot hashId pk.publicParam .top
+          (bottomTree sig.leafIndex) ⟨root.toArray⟩ sig.top).run
+        classify "refused: the bottom digest is not a codeword" bottom.isNone
+        classify "refused: the top digest is not a codeword" (bottom.isSome && top.isNone)
+        classify "refused: the path ends at another root" (top.any (· != pk.root))
+        classify "accepted after a change" (got == "1" && change != .none)
+        let _ := h
+    | _, _ => pure ()
     got === (← oracle.ask ["xmssverify", hex s.pk, hex s.msg, hex s.sig])
     if change == .none then got === "1"
     -- The index a signature carries is its first four bytes, little-endian.
@@ -173,6 +216,17 @@ def codewords (oracle : Oracle) : Property IO := propertyM do
     let got := match codeword? digest with
       | some x => String.join (x.toList.map fun d => toString d.val)
       | none => "none"
+    let value := digest.toList.foldr (fun b acc => acc * 256 + b.toNat) 0
+    let all := (List.range 64).map fun i => value >>> (2 * i) % 4
+    let sum := (all.take 58).foldl (· + ·) 0
+    classify "a codeword" (got != "none")
+    classify "refused: the sum is 105" (sum == 105)
+    classify "refused: the sum is 107" (sum == 107)
+    classify "refused: another sum" (sum != 106 && sum != 105 && sum != 107)
+    classify "refused: the sum is 106 and a last digit is not zero" (sum == 106 &&
+      (all.drop 58).any (· != 0))
+    classify "refused: only digit 63 is not zero, at sum 106" (sum == 106 &&
+      (all.drop 58) == [0, 0, 0, 0, 0, all[63]!] && all[63]! != 0)
     got === (← oracle.ask ["xmsscodeword", hexVec digest])
 
 def genLayer : Gen Layer := Gen.element [.bottom, .top]
@@ -188,6 +242,13 @@ def folds (oracle : Oracle) : Property IO := propertyM do
       (genBytesN 16))
   let path ← forAllWith hex (genBytesN 256)
   let (layer, e) ← forAll (Gen.zip genLayer genKeyIndex)
+  classify "the bottom layer" (layer == .bottom)
+  classify "the top layer" (layer == .top)
+  classify "a key index below 2^16" (e < 2 ^ 16)
+  classify "a key index of 2^16 or more, past the 16 levels" (e ≥ 2 ^ 16)
+  classify "the key index 2^32 - 1" (e == 2 ^ 32 - 1)
+  classify "the key index 0, a left child at every level" (e == 0)
+  classify "the key index 65535, a right child at every level" (e % 65536 == 65535)
   pure do
     let v16 (b : ByteArray) : Vector UInt8 16 := Vector.ofFn fun i => b[i.val]!
     let siblings : Vector Digest 16 :=
@@ -223,15 +284,30 @@ def otsLeaves (oracle : Oracle) : Property IO := propertyM do
     let got := match (otsLeaf hashId (v16 pp) layer e32 msg rho chains).run with
       | some leaf => hexVec leaf
       | none => "none"
+    classify "a leaf, from a codeword" (got != "none")
+    classify "refused: the digest is not a codeword" (got == "none")
+    classify "a message of 32 bytes" (msg.size == 32)
+    classify "a message of 16 bytes, a root" (msg.size == 16)
+    classify "the top layer" (layer == .top)
+    -- Each digit names where a chain starts, so every digit should turn up.
+    match codeword? (messageDigest hashId (v16 pp) layer e32 msg rho).run with
+    | some x =>
+      for d in [0, 1, 2, 3] do
+        classify s!"a chain starts at digit {d}" (x.toList.any (·.val == d))
+    | none => pure ()
     got === (← oracle.ask ["xmssotsleaf", hex pp, toString layer.toNat, toString e, hex msg,
       hexVec rho, hex y])
 
 /-- The public parameter and a small subtree of a seed are the model's. -/
 def subtrees (oracle : Oracle) : Property IO := propertyM do
   let seed ← forAllWith hex (genBytesN 32)
-  let (layer, level) ← forAll (Gen.zip genLayer (Gen.nat (.constant 0 3)))
+  let (layer, level) ← forAll (Gen.zip genLayer (Gen.frequency [(4, Gen.nat (.constant 0 3)),
+    (2, Gen.nat (.constant 4 5)), (1, pure 6)]))
   let j ← forAll (Gen.frequency [(2, Gen.nat (.linear 0 4)), (1, pure (2 ^ (32 - level) - 1)),
     (1, Gen.nat (.constant 0 (2 ^ (32 - level) - 1)))])
+  label s!"level {level}"
+  classify "the top layer" (layer == .top)
+  classify "the last node of its level" (j == 2 ^ (32 - level) - 1)
   pure do
     let s := (schemeSeed hashId (vec32 (beNat seed))).run
     let prf := seedPrf hashId s
@@ -249,6 +325,8 @@ def otsSigns (oracle : Oracle) : Property IO := propertyM do
   let seed ← forAllWith hex (genBytesN 32)
   let msg ← forAllWith hex (Gen.frequency [(1, genBytesN 32), (1, genBytesN 16)])
   let (layer, e) ← forAll (Gen.zip genLayer genKeyIndex)
+  classify "the top layer" (layer == .top)
+  classify "a message of 16 bytes, a root" (msg.size == 16)
   pure do
     let s := (schemeSeed hashId (vec32 (beNat seed))).run
     let prf := seedPrf hashId s

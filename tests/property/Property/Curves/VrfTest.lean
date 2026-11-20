@@ -46,6 +46,17 @@ def genChange : Gen Change :=
     (1, .rootSize <$> Gen.element [-1, 1]),
     (1, .swapSiblings <$> Gen.nat (.constant 0 30))]
 
+/-- The name of a change, for a label. -/
+def Change.name : Change → String
+  | .none => "nothing"
+  | .openingBit bit => if bit < 256 then "a bit of the secret" else "a bit of a sibling"
+  | .rootBit _ => "a bit of the root"
+  | .indexBit _ => "a bit of the index"
+  | .indexPast _ => "an index of 2^32 or more"
+  | .openingSize _ => "the length of the opening"
+  | .rootSize _ => "the length of the root"
+  | .swapSiblings _ => "two siblings exchanged"
+
 /-- Verification returns the output of the model, or nothing where the model refuses:
 
 - A changed secret, sibling, root or index.
@@ -76,6 +87,15 @@ def verifies (oracle : Oracle) : Property IO := propertyM do
     let got := match verifyBytes root index opening with
       | some output => hexVec output
       | none => "none"
+    label s!"changed: {change.name}"
+    classify "accepted" (got != "none")
+    classify "accepted after a change" (got != "none" && change != .none)
+    classify "refused" (got == "none")
+    classify "the index 0, a left child at every level" (index == 0)
+    classify "the index 2^32 - 1, a right child at every level" (index == 2 ^ 32 - 1)
+    classify "an index of 2^31 or more, the last level" (2 ^ 31 ≤ index && index < 2 ^ 32)
+    if let .openingBit bit := change then
+      if bit ≥ 256 then label s!"a bit of sibling {(bit / 256 - 1) / 8 * 8} to +7"
     got === (← oracle.ask ["vrfverify", hex root, toString index, hex opening])
     if change == .none then ensure (got != "none") "a valid opening is refused"
     -- An opening of 1056 bytes decodes, and encodes back.
@@ -90,6 +110,9 @@ def hashes (oracle : Oracle) : Property IO := propertyM do
   let (seed, randomness) ← forAllWith (fun (a, b) => s!"{hex a} {hex b}")
     (Gen.zip (genBytesN 32) (genBytesN 32))
   let index ← forAll genIndex
+  classify "the index 0" (index == 0)
+  classify "the index 2^32 - 1" (index == 2 ^ 32 - 1)
+  classify "an index of 2^24 or more, four bytes" (index ≥ 2 ^ 24)
   pure do
     let v (b : ByteArray) : Vector UInt8 32 := Vector.ofFn fun i => b[i.val]!
     let i := UInt32.ofNat index

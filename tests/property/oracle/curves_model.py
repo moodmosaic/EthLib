@@ -1,7 +1,8 @@
 """Models written from the source texts, on Python integers."""
 
-# SEC 1 v2 for the group law, ECDSA and recovery, and RFC 6979 section 3.2
-# for the nonce.  Nothing here reads EthLib.
+# SEC 1 v2 gives the group law, ECDSA and recovery.
+# RFC 6979 section 3.2 gives the nonce.
+# Nothing here reads EthLib.
 
 import hashlib
 import hmac

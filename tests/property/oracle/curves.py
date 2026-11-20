@@ -1,8 +1,9 @@
 """References for the public-key layer: one command per line, one answer per line."""
 
-# Words are separated by tabs.  Integers are decimal, bytes are hexadecimal
-# (`-` for none), and a point is `x,y` or `inf`.  An answer of `error` says the
-# reference refused the input.  The commands are listed in `COMMANDS` below.
+# Words are separated by tabs.
+# Integers are decimal, bytes are hexadecimal (`-` for none), and a point is `x,y` or `inf`.
+# An answer of `error` says the reference refused the input.
+# The commands are the cases of `answer` below, and of the modules it asks in turn.
 
 import os
 import sys
@@ -11,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import coincurve  # noqa: E402
 import curves_bls  # noqa: E402
+import curves_extra  # noqa: E402
 import curves_kzg  # noqa: E402
 import curves_model as model  # noqa: E402
 import curves_sphincs  # noqa: E402
@@ -108,21 +110,19 @@ def k1_decode(data):
     return f"{x},{y}"
 
 
-def k1_craft(u1, u2, x):
+def craft(c, u1, u2, x):
     """A valid signature whose R has x >= n, so that r = x - n: key, e, r, s."""
-    r = x % (K1.p - K1.n)
+    r = x % (c.p - c.n)
     while True:
-        big_r = model.lift_x(K1, r + K1.n, 0)
+        big_r = model.lift_x(c, r + c.n, 0)
         if big_r is not None and r > 0:
             break
-        r = (r + 1) % (K1.p - K1.n)
-    u1 = u1 % (K1.n - 1) + 1
-    u2 = u2 % (K1.n - 1) + 1
-    q = model.mul(
-        K1, pow(u2, -1, K1.n), model.add(K1, big_r, model.neg(K1, model.mul(K1, u1, K1.g)))
-    )
-    s = r * pow(u2, -1, K1.n) % K1.n
-    e = u1 * s % K1.n
+        r = (r + 1) % (c.p - c.n)
+    u1 = u1 % (c.n - 1) + 1
+    u2 = u2 % (c.n - 1) + 1
+    q = model.mul(c, pow(u2, -1, c.n), model.add(c, big_r, model.neg(c, model.mul(c, u1, c.g))))
+    s = r * pow(u2, -1, c.n) % c.n
+    e = u1 * s % c.n
     return f"{show(q)} {e} {r} {s}"
 
 
@@ -182,7 +182,9 @@ def answer(words):
             )
         case ["nonces", c, x, h1, ops]:
             # One candidate per `n`, after the rejections that the `r`s before it ask for.
-            gen = model.nonces(CURVES[c].n, int(x), unhex(h1))
+            # The order is that of a named curve, or any number of 256 bits.
+            order = CURVES[c].n if c in CURVES else int(c)
+            gen = model.nonces(order, int(x), unhex(h1))
             return " ".join(str(next(gen)) for op in ops if op == "n") or "-"
         case ["k1sign", d, h1]:
             return k1_sign(int(d), unhex(h1))
@@ -193,7 +195,9 @@ def answer(words):
         case ["k1decode", data]:
             return k1_decode(unhex(data))
         case ["k1craft", u1, u2, x]:
-            return k1_craft(int(u1), int(u2), int(x))
+            return craft(K1, int(u1), int(u2), int(x))
+        case ["r1craft", u1, u2, x]:
+            return craft(R1, int(u1), int(u2), int(x))
         case ["k1address", q]:
             return k1_address(point(q))
         case ["r1verify", q, h1, r, s]:
@@ -207,6 +211,7 @@ def answer(words):
         or curves_kzg.answer(words)
         or curves_xmss.answer(words)
         or curves_sphincs.answer(words)
+        or curves_extra.answer(words)
         or "error unknown command"
     )
 

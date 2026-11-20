@@ -51,7 +51,8 @@ def genBlob (invalid : Bool := true) : Gen BlobSpec := do
   let index := Gen.frequency [(1, pure 0), (1, pure 1), (1, pure 4095), (2, Gen.nat
       (.constant 0 4095))]
   let value := if invalid then genNear r else (· % r) <$> genNear r
-  let overrides ← Gen.frequency [(2, pure []), (3, Gen.list (.linear 0 3) (Gen.zip index value))]
+  -- The length does not follow the size, since these properties run few cases.
+  let overrides ← Gen.frequency [(2, pure []), (3, Gen.list (.constant 1 3) (Gen.zip index value))]
   pure ⟨mode, seed, overrides⟩
 
 def blobHex (spec : BlobSpec) : String := hexVec spec.blob
@@ -63,6 +64,7 @@ def genZ : Gen Nat :=
   Gen.frequency [
     (3, (fun j => modPow r 7 ((r - 1) / 4096 * j)) <$> Gen.nat (.constant 0 4095)),
     (1, (fun j => modPow r 7 ((r - 1) / 8192 * j)) <$> Gen.nat (.constant 0 8191)),
+    (1, Gen.element [1, r - 1]),
     (4, genNear r)]
 
 /-- 48 bytes near a commitment or a proof.
@@ -89,6 +91,26 @@ def verdict (result : Except KzgError Bool) : String :=
   | .ok false => "0"
   | .error _ => "error"
 
+/-- A label for the answer of a verification: accepted, refused, or the constructor of its error. -/
+def outcome (result : Except KzgError Bool) : String :=
+  match result with
+  | .ok true => "accepted"
+  | .ok false => "refused by the pairing"
+  | .error e => s!"error {ctorName e}"
+
+/-- The classes of a blob, as labels. -/
+def blobClasses (spec : BlobSpec) : PropertyM Unit := do
+  let values := spec.overrides.map (·.2)
+  let invalid := values.any (· ≥ r)
+  classify "blob: every element zero" (!invalid && (List.range 4096).all (spec.element · == 0))
+  classify "blob: one value in every element" (spec.mode == 1 && spec.overrides.isEmpty)
+  classify "blob: an element of exactly r, refused" (values.contains r)
+  classify "blob: an element above r, refused" (values.any (· > r))
+  classify "blob: an element of r - 1" (values.contains (r - 1))
+  classify "blob: element 0 or 4095 set apart" (spec.overrides.any fun (i, _) =>
+    i == 0 || i == 4095)
+  classify "blob: valid" (!invalid)
+
 /-- The commitment of a blob is c-kzg's.
 
 A blob with an element of `r` or more is refused.
@@ -96,10 +118,12 @@ A blob with an element of `r` or more is refused.
 The versioned hash of the commitment is that of EIP-4844. -/
 def commits (setup : TrustedSetup) (oracle : Oracle) : Property IO := propertyM do
   let spec ← forAll genBlob
+  blobClasses spec
   pure do
     let got := match blobToKzgCommitment setup spec.blob with
       | .ok c => hexVec c
       | .error _ => "error"
+    classify "the commitment is the point at infinity" (got == hexVec Bls.G1.infinityBytes)
     got === (← oracle.ask ["kzgcommit", blobHex spec])
     match blobToKzgCommitment setup spec.blob with
     | .ok c => hexVec (kzgCommitmentToVersionedHash c) ===
@@ -119,12 +143,27 @@ def proves (setup : TrustedSetup) (oracle : Oracle) : Property IO := propertyM d
     | _, _ => (Bls.G1.infinityBytes, Bls.G1.infinityBytes, 0)
   let commitment' ← forAllWith hexVec (genBad48 commitment)
   let proof' ← forAllWith hexVec (genBad48 proof)
-  let y' ← forAll (Gen.frequency [(5, pure y), (1, pure ((y + 1) % r)), (1, genNear r)])
-  let z' ← forAll (Gen.frequency [(5, pure (z % r)), (1, pure z), (1, genZ)])
+  let y' ← forAll (Gen.frequency [(4, pure y), (2, pure ((y + 1) % r)), (1, genNear r)])
+  let z' ← forAll (Gen.frequency [(4, pure (z % r)), (1, pure z), (2, genZ)])
+  blobClasses spec
+  classify "proof: z is a root of unity of the domain" (z < r && modPow r z 4096 == 1)
+  classify "proof: z is 1, the first of the domain" (z == 1)
+  classify "proof: z is outside the domain" (z < r && modPow r z 4096 != 1)
+  classify "proof: z is zero" (z == 0)
+  classify "proof: z is exactly r, refused" (z == r)
+  classify "proof: z is above r, refused" (z > r)
   pure do
     let got := match computeKzgProof setup blob (vec32 z) with
       | .ok (proof, y) => s!"{hexVec proof} {hexVec y}"
       | .error _ => "error"
+    classify "proof: the point at infinity"
+      ((words got).head? == some (hexVec Bls.G1.infinityBytes))
+    let verified := verifyKzgProof setup commitment' (vec32 z') (vec32 y') proof'
+    label s!"verify: {outcome verified}"
+    classify "verify: z of r or more" (z' ≥ r)
+    classify "verify: y of r or more" (y' ≥ r)
+    classify "verify: refused with valid points and numbers, only y or z changed"
+      (verified.toOption == some false && commitment' == commitment && proof' == proof)
     got === (← oracle.ask ["kzgproof", blobHex spec, hexVec (vec32 z)])
     verdict (verifyKzgProof setup commitment' (vec32 z') (vec32 y') proof') === (← oracle.ask
       ["kzgverify", hexVec commitment', hexVec (vec32 z'), hexVec (vec32 y'), hexVec proof'])
@@ -138,36 +177,52 @@ structure Triple where
 instance : Repr Triple := ⟨fun t _ => repr (t.spec, hexVec t.commitment, hexVec t.proof)⟩
 
 def genTriple (setup : TrustedSetup) : Gen Triple := do
-  let spec ← Gen.frequency [(6, genBlob false), (1, genBlob)]
+  let spec ← Gen.frequency [(5, genBlob false), (1, genBlob)]
   let blob := spec.blob
   let commitment := (blobToKzgCommitment setup blob).toOption.getD Bls.G1.infinityBytes
   let proof := (computeBlobKzgProof setup blob commitment).toOption.getD Bls.G1.infinityBytes
-  let commitment ← Gen.frequency [(6, pure commitment), (1, genBad48 commitment)]
-  let proof ← Gen.frequency [(6, pure proof), (1, genBad48 proof)]
+  let commitment ← Gen.frequency [(5, pure commitment), (1, genBad48 commitment)]
+  let proof ← Gen.frequency [(5, pure proof), (1, genBad48 proof)]
   pure ⟨spec, commitment, proof⟩
 
 /-- The proof of a blob against a commitment is c-kzg's, and so is its verification. -/
 def blobProofs (setup : TrustedSetup) (oracle : Oracle) : Property IO := propertyM do
   let t ← forAll (genTriple setup)
+  blobClasses t.spec
   pure do
     let blob := t.spec.blob
-    let got := match computeBlobKzgProof setup blob t.commitment with
+    let made := computeBlobKzgProof setup blob t.commitment
+    let got := match made with
       | .ok proof => hexVec proof
       | .error _ => "error"
+    match made with
+    | .ok _ => label "proof: made"
+    | .error e => label s!"proof: error {ctorName e}"
+    label s!"verify: {outcome (verifyBlobKzgProof setup blob t.commitment t.proof)}"
     got === (← oracle.ask ["kzgblobproof", blobHex t.spec, hexVec t.commitment])
     verdict (verifyBlobKzgProof setup blob t.commitment t.proof) === (← oracle.ask
       ["kzgverifyblob", blobHex t.spec, hexVec t.commitment, hexVec t.proof])
 
 /-- The batch verification of blobs is c-kzg's, on lists of any lengths. -/
 def batches (setup : TrustedSetup) (oracle : Oracle) : Property IO := propertyM do
-  let triples ← forAll (Gen.list (.linear 0 3) (genTriple setup))
+  -- Two or three blobs in most cases: a batch of one takes the path of a single proof.
+  let triples ← forAll (Gen.frequency [(1, pure []),
+    (2, Gen.list (.constant 1 1) (genTriple setup)),
+    (6, Gen.list (.constant 2 3) (genTriple setup))])
   let (dropC, dropP) ← forAll (Gen.zip (Gen.frequency [(6, pure 0), (1, pure 1)])
     (Gen.frequency [(6, pure 0), (1, pure 1)]))
   pure do
     let blobs := triples.map (·.spec.blob)
     let commitments := (triples.map (·.commitment)).drop dropC
     let proofs := (triples.map (·.proof)).drop dropP
-    verdict (verifyBlobKzgProofBatch setup blobs.toArray commitments.toArray proofs.toArray)
+    let result := verifyBlobKzgProofBatch setup blobs.toArray commitments.toArray proofs.toArray
+    label s!"{outcome result}"
+    label s!"{blobs.length} blobs"
+    classify "accepted with two or three blobs" (result.toOption == some true &&
+      blobs.length ≥ 2)
+    classify "refused by the pairing with two or three blobs" (result.toOption == some false &&
+      blobs.length ≥ 2)
+    verdict result
       === (← oracle.ask ["kzgverifybatch", listWord (blobs.map hexVec),
         listWord (commitments.map hexVec), listWord (proofs.map hexVec)])
 
@@ -178,6 +233,7 @@ def digest {n : Nat} (parts : Array (Vector UInt8 n)) : String :=
 /-- The cells of a blob and their proofs are c-kzg's. -/
 def cells (setup : TrustedSetup) (oracle : Oracle) : Property IO := propertyM do
   let spec ← forAll genBlob
+  blobClasses spec
   pure do
     let expected ← oracle.ask ["kzgcells", blobHex spec]
     match computeCellsAndKzgProofs setup spec.blob, computeCells spec.blob with
@@ -195,6 +251,9 @@ def genIndices : Gen (List Nat) := do
     (2, (fun k => all.drop k |>.take 64) <$> Gen.nat (.constant 0 64)),
     (1, pure (all.filter (· % 2 == 1))),
     (1, pure all),
+    (1, pure (all.filter (· % 2 == 0))),
+    -- The edges of the count: 63 and 64 cells, and 129, one more than there are.
+    (1, Gen.element [all.take 63, all.take 64, all.drop 64, List.range 129]),
     (1, (fun k => all.take k) <$> Gen.nat (.constant 60 66))]
   Gen.frequency [
     (8, pure chosen),
@@ -209,12 +268,14 @@ It refuses what c-kzg refuses:
 
 - Too few cells.
 - An index out of range or out of order.
-- An invalid cell. -/
+- An invalid cell.
+
+On more than 64 cells that no polynomial gives, the cells are those of the specification. -/
 def recovers (setup : TrustedSetup) (oracle : Oracle) : Property IO := propertyM do
   let spec ← forAll (genBlob false)
   let indices ← forAll genIndices
-  let (spoil, value) ← forAll (Gen.zip (Gen.frequency [(6, pure none),
-    (1, some <$> Gen.nat (.constant 0 63))]) (genNear r))
+  let (spoil, value) ← forAll (Gen.zip (Gen.frequency [(5, pure none),
+    (2, some <$> Gen.nat (.constant 0 63))]) (genNear r))
   let fewer ← forAll (Gen.frequency [(8, pure 0), (1, pure 1)])
   pure do
     let .ok (all, _) := computeCellsAndKzgProofs setup spec.blob | failWith "no cells"
@@ -226,18 +287,47 @@ def recovers (setup : TrustedSetup) (oracle : Oracle) : Property IO := propertyM
           if i.val / 32 == at_ then (vec32 value)[i.val % 32]! else first[i.val]!) :: rest
       | _, cs => cs
     let chosen := chosen.drop fewer
-    let got := match recoverCellsAndKzgProofs setup indices.toArray chosen.toArray with
+    let result := recoverCellsAndKzgProofs setup indices.toArray chosen.toArray
+    let got := match result with
       | .ok (cells, proofs) => s!"{digest cells} {digest proofs}"
       | .error _ => "error"
+    match result with
+    | .ok _ =>
+      label "recovered"
+      classify "recovered from the even cells or the odd ones" (indices.length == 64 &&
+        indices.all (· % 2 == indices.headD 0 % 2))
+      classify "recovered from exactly 64 cells" (indices.length == 64)
+      classify "recovered from 65 to 127 cells" (64 < indices.length && indices.length < 128)
+      classify "recovered from all 128 cells" (indices.length == 128)
+      classify "recovered from cells that one polynomial does not give" spoil.isSome
+      classify "recovered without cell 0" (!indices.contains 0)
+      classify "recovered without cell 127" (!indices.contains 127)
+    | .error e => label s!"error {ctorName e}"
     let expected ← oracle.ask ["kzgrecover", listWord (indices.map toString),
       listWord (chosen.map hexVec)]
-    -- Given all 128 cells, c-kzg copies them, where the specification interpolates them again.
+    -- More than 64 cells may be the values of no polynomial of degree below 4096.
     --
-    -- The two differ on cells that are not the values of one polynomial.
+    -- The specification then cuts the recovered polynomial to 4096 coefficients and evaluates it.
     --
-    -- So only the proofs are compared there.
-    if spoil.isSome && indices.length == 128 && got != "error" && expected != "error" then
+    -- c-kzg answers the values it recovered, which are not those of the cut polynomial.
+    --
+    -- The proofs of both are those of the cut polynomial, so they are compared.
+    --
+    -- EthLib's cells go back to c-kzg, 64 of them, which one polynomial always gives.
+    --
+    -- Its recovery from those must be the cells and the proofs of EthLib.
+    let inconsistent := got != expected && spoil.isSome && indices.length > 64 &&
+      got != "error" && expected != "error"
+    classify "cells of no polynomial: the proofs agree, and the cells are those of the text"
+      inconsistent
+    if inconsistent then
       (words got).drop 1 === (words expected).drop 1
+      match result with
+      | .ok (cells, _) =>
+        let odd := (List.range 64).map (2 * · + 1)
+        got === (← oracle.ask ["kzgrecover", listWord (odd.map toString),
+          listWord (odd.map fun i => hexVec cells[i]!)])
+      | .error _ => pure ()
     else got === expected
 
 /-- The batch verification of cell proofs is c-kzg's.
@@ -245,9 +335,13 @@ def recovers (setup : TrustedSetup) (oracle : Oracle) : Property IO := propertyM
 It runs on cells of up to two blobs, with an index, a cell, a proof or a commitment changed. -/
 def verifiesCells (setup : TrustedSetup) (oracle : Oracle) : Property IO := propertyM do
   let (specA, specB) ← forAll (Gen.zip (genBlob false) (genBlob false))
-  let picks ← forAll (Gen.list (.linear 0 5) (Gen.zip Gen.bool (Gen.frequency [
-    (1, pure 0), (1, pure 127), (3, Gen.nat (.constant 0 127))])))
-  let change ← forAll (Gen.frequency [(5, pure 0), (1, pure 1), (1, pure 2), (1, pure 3),
+  let pick := Gen.zip Gen.bool (Gen.frequency [
+    (1, pure 0), (1, pure 127), (3, Gen.nat (.constant 0 127))])
+  -- A cell twice, and one cell of each blob at one index, are rows of their own.
+  let picks ← forAll (Gen.frequency [(1, pure []), (2, Gen.list (.constant 1 1) pick),
+    (6, Gen.list (.constant 2 6) pick),
+    (1, (fun (second, i) => [(second, i), (second, i), (!second, i)]) <$> pick)])
+  let change ← forAll (Gen.frequency [(4, pure 0), (1, pure 1), (1, pure 2), (1, pure 3),
     (1, pure 4), (1, pure 5), (1, pure 6), (1, pure 7)])
   let value ← forAll (genNear r)
   let bad ← forAllWith hexVec (genBad48 Bls.G1.infinityBytes)
@@ -283,8 +377,20 @@ def verifiesCells (setup : TrustedSetup) (oracle : Oracle) : Property IO := prop
       | 6, _ :: rest => bad :: rest
       | 7, cs => cs.reverse
       | _, cs => cs
-    verdict (verifyCellKzgProofBatch setup commitments.toArray indices.toArray cellList.toArray
-      proofs.toArray) === (← oracle.ask ["kzgverifycells", listWord (commitments.map hexVec),
+    let result := verifyCellKzgProofBatch setup commitments.toArray indices.toArray
+      cellList.toArray proofs.toArray
+    label s!"{outcome result}"
+    classify "accepted with no cell" (result.toOption == some true && rows.isEmpty)
+    classify "accepted with cells of two blobs" (result.toOption == some true &&
+      (commitments.map hexVec).eraseDups.length == 2)
+    classify "accepted with a commitment twice" (result.toOption == some true &&
+      (commitments.map hexVec).eraseDups.length < commitments.length)
+    classify "accepted with a cell twice" (result.toOption == some true &&
+      (rows.map fun row => (hexVec row.1, row.2.1)).eraseDups.length < rows.length)
+    classify "the cell index 0" (indices.contains 0)
+    classify "the cell index 127" (indices.contains 127)
+    classify "the cell index 128, out of range" (indices.contains 128)
+    verdict result === (← oracle.ask ["kzgverifycells", listWord (commitments.map hexVec),
         listWord (indices.map toString), listWord (cellList.map hexVec),
         listWord (proofs.map hexVec)])
 

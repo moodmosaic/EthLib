@@ -9,6 +9,8 @@ import Property.Curves.VrfTest
 import Property.Curves.SphincsTest
 import Property.Curves.KzgPoly
 import Property.Curves.Machines
+import Property.Curves.Every
+import Property.Curves.Minimums
 
 /-!
 # The public-key layer, on generated inputs
@@ -20,13 +22,21 @@ It is that of a reference implementation (`oracle/curves.py`), or of a model on 
     lake exe curves-property              # 100 cases of each
     lake exe curves-property 1000
     lake exe curves-property 1000 bn      # Only the groups whose name contains `bn`.
+    HEDGEHOG_ONLY="bls verifies" lake exe curves-property 1000
+
+`HEDGEHOG_ONLY` and `HEDGEHOG_RECHECK` select properties and replay a case.
+
+Every property names the classes of its cases.
+
+A run of 500 cases or more requires a minimum share of the classes that matter.
 -/
 
 open Hedgehog Support CurvesProperty
 
 /-- The groups of the driver, each with its properties. -/
 def groups (oracle : Oracle) (setup : EthLib.Cryptography.Kzg.TrustedSetup)
-    (xmss : List XmssTest.Signed) (cases : Nat) : List (String × List (String × Property IO)) :=
+    (xmss : List XmssTest.Signed) (special : Specials) (cases : Nat) :
+    List (String × List (String × Property IO)) :=
   let slow := max 1 (cases / 20)
   [("curves: kernels", [
     ("Montgomery limbs are the integers mod p", Kernels.montgomery.withTests cases),
@@ -47,16 +57,20 @@ def groups (oracle : Oracle) (setup : EthLib.Cryptography.Kzg.TrustedSetup)
     ("k1 group law", (K1.group oracle).withTests cases),
     ("k1 ECDH", (K1.ecdh oracle).withTests cases),
     ("k1 address", (K1.address oracle).withTests cases),
-    ("k1 field kernels", K1.field.withTests cases)]),
+    ("k1 field kernels", K1.field.withTests cases),
+    ("k1 operations on bytes, as the bindings call them", (K1.exports oracle).withTests cases)]),
    ("curves: secp256r1", [
     ("r1 signs as RFC 6979", (R1.sign oracle).withTests cases),
     ("r1 verifies as SEC 1", (R1.verify oracle).withTests cases),
+    ("r1 verifies a signature with x_R >= n", (R1.verifyWrapped oracle).withTests cases),
     ("r1 verifies at the edges", (R1.verifyEdges oracle).withTests cases),
     ("r1 decodes the uncompressed encoding only", (R1.decode oracle).withTests cases),
-    ("r1 group law", (R1.group oracle).withTests cases)]),
+    ("r1 group law", (R1.group oracle).withTests cases),
+    ("r1 verification on bytes, as the bindings call it", (R1.exports oracle).withTests cases)]),
    ("curves: alt_bn128", [
     ("bn G1 group law", (Bn.group1 oracle).withTests cases),
     ("bn G2 group law", (Bn.group2 oracle).withTests (max 1 (cases / 4))),
+    ("bn twist outside the subgroup", (Bn.twist oracle special).withTests (max 1 (cases / 4))),
     ("bn pairing value", (Bn.pairingValue oracle).withTests slow),
     ("bn pairing check", (Bn.pairingChecks oracle).withTests slow)]),
    ("curves: bls12-381 arithmetic", [
@@ -64,14 +78,14 @@ def groups (oracle : Oracle) (setup : EthLib.Cryptography.Kzg.TrustedSetup)
     ("bls batch inverse", Bls12.batchInverse.withTests cases),
     ("bls square root in Fp2", Bls12.sqrt2.withTests cases),
     ("bls G1 decompression and key validation", (Bls12.g1Decode oracle).withTests cases),
-    ("bls G2 decompression", (Bls12.g2Decode oracle).withTests cases),
+    ("bls G2 decompression", (Bls12.g2Decode oracle special).withTests cases),
     ("bls G1 group law", (Bls12.g1Group oracle).withTests (max 1 (cases / 4))),
     ("bls G2 group law", (Bls12.g2Group oracle).withTests (max 1 (cases / 4))),
     ("bls multi-scalar multiplication", (Bls12.msm oracle).withTests (max 1 (cases / 4))),
     ("bls pairing check", (Bls12.pairingChecks oracle).withTests (max 1 (cases / 4))),
     ("bls expand_message_xmd", (Bls12.expand oracle).withTests cases),
     ("bls hash to G2", (Bls12.hashToG2 oracle).withTests slow),
-    ("bls map to curve", (Bls12.mapToCurve oracle).withTests slow)]),
+    ("bls map to curve", (Bls12.mapToCurve oracle special).withTests slow)]),
    ("curves: bls signatures", [
     ("bls secret keys", (Bls12.secretKeys oracle).withTests (max 1 (cases / 4))),
     ("bls signs", (Bls12.signs oracle).withTests slow),
@@ -126,17 +140,52 @@ def groups (oracle : Oracle) (setup : EthLib.Cryptography.Kzg.TrustedSetup)
     ("KZG blob store (Command, madhouse)",
       (Machines.store ⟨oracle, setup⟩ .madhouse).withTests (max 1 (cases / 50))),
     ("KZG blob store (Command, deterministic)",
-      Machines.store ⟨oracle, setup⟩ .deterministic)])]
+      Machines.store ⟨oracle, setup⟩ .deterministic)]),
+   ("curves: every parameter", [
+    ("every: the two tags of the proof-of-possession scheme", (Every.tags oracle).withTests 1),
+    ("every: core BLS operations under any tag", (Every.coreAnyTag oracle).withTests slow),
+    ("every: a signature is no proof of possession",
+      Every.separation.withTests (max 1 (cases / 50))),
+    ("every: any count of field elements", Every.fieldElements.withTests (max 1 (cases / 4))),
+    ("every: the sign of a coordinate", Every.signs.withTests cases),
+    ("every: powers in any modulus", Every.powers.withTests cases),
+    ("every: the cofactor of G2 is h_eff", (Every.cofactor oracle).withTests slow),
+    ("every: a child key of any parent", (Every.childKeys oracle).withTests (max 1 (cases / 4))),
+    ("every: all 128 cells of a blob", (Every.everyCell setup oracle).withTests
+      (max 1 (cases / 250))),
+    ("every: the coset of every cell index", Every.everyCoset.withTests 1),
+    ("every: the evaluation form over any domain", Every.anyDomain.withTests cases),
+    ("every: the FFT of any length", Every.anyFft.withTests (max 1 (cases / 4))),
+    ("every: the FFT in G1", (Every.fftInG1 oracle).withTests slow),
+    ("every: addresses of leanXMSS", (Every.xmssAddresses oracle).withTests cases),
+    ("every: paths of a small subtree of leanXMSS", (Every.xmssPaths oracle).withTests slow),
+    ("every: codewords of leanSPHINCS", (Every.sphincsCodewords oracle).withTests cases),
+    ("every: addresses of leanSPHINCS", (Every.sphincsAddresses oracle).withTests cases)])]
 
 def main (args : List String) : IO UInt32 := do
   let cases := casesOf args
+  -- A word among the arguments keeps the groups whose name holds it.
   let only := args.filter fun arg => arg.toNat?.isNone
+  let select ← Selection.fromEnv
   let oracle ← Oracle.start "curves"
   let .ok setup := EthLib.Cryptography.Kzg.TrustedSetup.ofHex
     | throw (IO.userError "the embedded trusted setup does not decode")
   let xmss ← XmssTest.loadVectors oracle
+  let special ← Specials.load oracle
+  -- A case of KZG or of leanSPHINCS takes seconds, and each shrink runs one more.
+  let slowNames := ["kzg", "KZG", "128 cells", "sphincs signs"]
+  let bounded (name : String) (p : Property IO) : Property IO :=
+    if slowNames.any fun word => (name.splitOn word).length > 1 then p.withShrinks 40 else p
+  let all := (groups oracle setup xmss special cases).map fun (group, properties) =>
+    (group, properties.map fun (name, p) => (name, bounded name p))
+  -- A minimum for a name that no property has would be asked of nothing.
+  let names := all.flatMap fun (_, properties) => properties.map (·.1)
+  for (name, _) in minimums do
+    unless names.contains name do throw (IO.userError s!"no property is named {name}")
   let mut failed := false
-  for (name, properties) in groups oracle setup xmss cases do
+  for (name, properties) in all do
     if only.isEmpty || only.any fun word => (name.splitOn word).length > 1 then
-      unless ← checkGroup name properties do failed := true
+      let properties := properties.map fun (name, p) =>
+        (name, withMinimums cases ((minimums.lookup name).getD []) p)
+      unless ← checkGroup name properties select do failed := true
   pure (if failed then 1 else 0)

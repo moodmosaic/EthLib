@@ -1,6 +1,7 @@
 import Property.Curves.BlsSig
 import Property.Curves.Kzg
 import EthLib.Cryptography.Secp256k1
+import EthLib.Cryptography.Secp256r1
 
 /-!
 # State machines of the public-key layer
@@ -60,8 +61,29 @@ def accumulator (oracle : Oracle) : StateMachine Nat Step Bls.G1 IO where
     | .cancel => 0
     | .reencode => s
   initSut s := pure (Bls.G1.mulNat Bls.G1.generator s)
-  applySut acc _ _ t := do
+  applySut acc before _ t := do
     let g := Bls.G1.generator
+    classify "a step from the point at infinity" (before == 0)
+    let other (k : Nat) (name : String) : TestT IO Unit := do
+      classify s!"{name}: the accumulator itself, a doubling" (k % r == before && before != 0)
+      classify s!"{name}: its opposite, the point at infinity" ((k + before) % r == 0 &&
+        before != 0)
+      classify s!"{name}: the point at infinity" (k % r == 0)
+      classify s!"{name}: another point" (k % r != before && (k + before) % r != 0 &&
+        k % r != 0 && before != 0)
+    match t with
+    | .add k => other k "add"
+    | .addJacobian k => other k "add a Jacobian form"
+    | .sub k => other (r - k % r) "subtract"
+    | .double => label "double"
+    | .neg => label "negate"
+    | .mul k =>
+      classify "multiply by zero" (k == 0)
+      classify "multiply by one" (k == 1)
+      classify "multiply by another scalar" (k > 1)
+    | .addSelf => label "add to itself"
+    | .cancel => label "add its negative"
+    | .reencode => label "compress and decompress"
     let spread (pt : Bls.G1) : Bls.G1 :=
       Bls.G1.add (Bls.G1.double (Bls.G1.double pt)) (Bls.G1.neg (Bls.G1.add (Bls.G1.double pt) pt))
     match t with
@@ -89,8 +111,9 @@ inductive NonceStep where
   | reject
   deriving Repr, BEq
 
-/-- The key, the hash and the operations so far, newest first. -/
+/-- The order, the key, the hash and the operations so far, newest first. -/
 structure NonceModel where
+  order : Nat
   key : Nat
   hash : Nat
   taken : List NonceStep
@@ -106,17 +129,28 @@ It allows a `reject` only right after a `next`. -/
 def nonces (oracle : Oracle) :
     StateMachine NonceModel NonceStep (Rfc6979.NonceState × List Nat) IO where
   initState := do
-    let n := Secp256k1.Fn.modulus
+    -- The generator takes any order of 256 bits: those of the two curves, and any other.
+    let n ← Gen.frequency [(2, pure Secp256k1.Fn.modulus), (2, pure Secp256r1.Fn.modulus),
+      (1, Gen.element [2 ^ 255, 2 ^ 255 + 1, 2 ^ 256 - 1]),
+      (3, Gen.nat (.constant (2 ^ 255) (2 ^ 256 - 1)))]
     let (key, hash) ← Gen.zip (genScalar n) (genNear n)
-    pure ⟨key, hash, []⟩
+    pure ⟨n, key, hash, []⟩
   transitions s := pure (if s.taken.head? == some .next then .reject else .next)
   preconditions s t := (s.taken.head? == some .next) == (t == .reject)
   apply s t := { s with taken := t :: s.taken }
-  initSut s := pure (Rfc6979.nonceSeed Secp256k1.Fn.modulus s.key (vec32 s.hash), [])
-  applySut sut _ _ t :=
+  initSut s := pure (Rfc6979.nonceSeed s.order s.key (vec32 s.hash), [])
+  applySut sut before _ t := do
     match t with
     | .next =>
       let (candidate, state) := Rfc6979.nonceNext sut.1
+      classify "a second candidate or a later one, after a rejection" (!sut.2.isEmpty)
+      classify "ten candidates or more" (sut.2.length ≥ 9)
+      classify "a candidate of the order or more, which a signer rejects" (candidate ≥ before.order)
+      classify "the hash is the order or more, so it is reduced" (before.hash ≥ before.order)
+      classify "the order of secp256k1" (before.order == Secp256k1.Fn.modulus)
+      classify "the order of P-256" (before.order == Secp256r1.Fn.modulus)
+      classify "another order of 256 bits" (before.order != Secp256k1.Fn.modulus &&
+        before.order != Secp256r1.Fn.modulus)
       pure (state, sut.2 ++ [candidate])
     | .reject => pure (Rfc6979.nonceReject sut.1, sut.2)
   invariants sut s := do
@@ -124,7 +158,8 @@ def nonces (oracle : Oracle) :
       | .next => 'n'
       | .reject => 'r')
     if !sut.2.isEmpty then
-      " ".intercalate (sut.2.map toString) === (← oracle.ask ["nonces", "k1", toString s.key,
+      " ".intercalate (sut.2.map toString) === (← oracle.ask ["nonces", toString s.order,
+        toString s.key,
         hexVec (vec32 s.hash), ops])
 
 /-! ## A set of BLS signers -/
@@ -142,7 +177,6 @@ def bit (b : Bool) : String := if b then "1" else "0"
 
 /-- Register a key: its public key is the oracle's, and its proof of possession verifies. -/
 structure Register where
-  oracle : Oracle
   key : Nat
 
 /-- Register a key and check it against the oracle. -/
@@ -153,46 +187,65 @@ def register (oracle : Oracle) (key : Nat) (s : Signers) : TestT IO Signers := d
   match popProve sk with
   | .ok proof => ensure (popVerify pk proof) "an honest proof of possession is refused"
   | .error _ => failWith "no proof of possession"
+  classify "a second key or a later one is registered" (!s.keys.isEmpty)
   pure { s with keys := s.keys.push key }
 
 instance : Command Register Signers Oracle IO where
   check _ c s := !s.keys.contains c.key && s.keys.size < 5
-  apply _ c s := register c.oracle c.key s
+  apply oracle c s := register oracle c.key s
   label c := s!"REGISTER({c.key})"
-  build oracle := Register.mk oracle <$>
+  build _ := Register.mk <$>
     Gen.frequency [(1, Gen.nat (.constant 1 3)), (2, genScalar r)]
+  -- The keys after the command, so that the commands after it are built for them.
+  next _ c s := if !s.keys.contains c.key && s.keys.size < 5
+    then { s with keys := s.keys.push c.key } else s
 
 /-- Register the opposite of a registered key, so that the two public keys sum to infinity. -/
 structure RegisterOpposite where
-  oracle : Oracle
   pick : Nat
 
 instance : Command RegisterOpposite Signers Oracle IO where
   check _ c s := !s.keys.isEmpty && s.keys.size < 5 &&
     !s.keys.contains (r - s.keys[c.pick % s.keys.size]!)
-  apply _ c s := register c.oracle (r - s.keys[c.pick % s.keys.size]!) s
+  apply oracle c s := do
+    label "the opposite of a key is registered"
+    register oracle (r - s.keys[c.pick % s.keys.size]!) s
   label c := s!"REGISTER_OPPOSITE({c.pick})"
-  build oracle := RegisterOpposite.mk oracle <$> Gen.nat (.constant 0 4)
+  build _ := RegisterOpposite.mk <$> Gen.nat (.constant 0 4)
+  next _ c s :=
+    if !s.keys.isEmpty && s.keys.size < 5 && !s.keys.contains (r - s.keys[c.pick % s.keys.size]!)
+    then { s with keys := s.keys.push (r - s.keys[c.pick % s.keys.size]!) } else s
+  -- One of the keys registered by then.
+  buildIn _ s := RegisterOpposite.mk <$> Gen.nat (.constant 0 (s.keys.size - 1))
 
 /-- A registered key signs a message: the signature is the oracle's and verifies. -/
 structure Sign where
-  oracle : Oracle
   pick : Nat
   msg : ByteArray
 
 instance : Command Sign Signers Oracle IO where
   check _ _ s := !s.keys.isEmpty && s.made.size < 6
-  apply _ c s := do
+  apply oracle c s := do
     let index := c.pick % s.keys.size
     let key := s.keys[index]!
     let sig := sigOf key c.msg
-    hex sig === (← c.oracle.ask ["blssign", toString key, hex c.msg])
+    hex sig === (← oracle.ask ["blssign", toString key, hex c.msg])
     ensure (verify (vec 48 (pkOf key)) c.msg (vec 96 sig)) "an honest signature is refused"
+    label "a signature is made"
+    classify "a message is signed a second time" (s.made.any fun (_, msg, _) => msg == c.msg)
     pure { s with made := s.made.push (index, c.msg, sig) }
   label c := s!"SIGN({c.pick}, {hex c.msg})"
-  build oracle := Gen.zipWith (Sign.mk oracle) (Gen.nat (.constant 0 4))
+  build _ := Gen.zipWith Sign.mk (Gen.nat (.constant 0 4))
     (Gen.frequency [(1, pure ByteArray.empty), (1, pure (beBytes 1 7)), (2, genBytes
         (.linear 0 12))])
+  -- The signature itself is made in `apply`: here only the count and the message matter.
+  next _ c s := if !s.keys.isEmpty && s.made.size < 6
+    then { s with made := s.made.push (c.pick % s.keys.size, c.msg, ByteArray.empty) } else s
+  -- A key registered by then, and often a message that was signed before.
+  buildIn _ s := Gen.zipWith Sign.mk (Gen.nat (.constant 0 (s.keys.size - 1)))
+    (Gen.frequency ([(1, pure ByteArray.empty), (1, pure (beBytes 1 7)),
+      (2, genBytes (.linear 0 12))] ++
+      (if s.made.isEmpty then [] else [(2, Gen.element (s.made.toList.map (·.2.1)))])))
 
 /-- A signature made earlier, with one bit of the key, message or signature changed.
 
@@ -200,14 +253,13 @@ The other choice is the same signature under another registered key.
 
 Either must be refused, as the oracle refuses it, and nothing changes. -/
 structure Tamper where
-  oracle : Oracle
   pick : Nat
   field : Nat
   place : Nat
 
 instance : Command Tamper Signers Oracle IO where
   check _ _ s := !s.made.isEmpty
-  apply _ c s := do
+  apply oracle c s := do
     let (index, msg, sig) := s.made[c.pick % s.made.size]!
     let pk := pkOf s.keys[index]!
     let other := pkOf s.keys[(index + 1) % s.keys.size]!
@@ -217,14 +269,26 @@ instance : Command Tamper Signers Oracle IO where
       | 2 => (pk, msg, flipBit sig c.place)
       | _ => (other, msg, sig)
     let got := verify (vec 48 pk) msg (vec 96 sig)
-    bit got === (← c.oracle.ask ["blsverify", hex pk, hex msg, hex sig])
+    bit got === (← oracle.ask ["blsverify", hex pk, hex msg, hex sig])
     ensure (!got || (c.field % 4 == 3 && s.keys.size == 1)) "a changed signature is accepted"
+    label (match c.field % 4 with
+      | 0 => "tampered: a bit of the key"
+      | 1 => "tampered: a bit of the message"
+      | 2 => "tampered: a bit of the signature"
+      | _ => if s.keys.size == 1 then "tampered: the same key, accepted"
+        else "tampered: another registered key")
+    if !got then label s!"tamper refused: {coreRefusal pk sig}"
     pure s
   label c := s!"TAMPER({c.pick}, {c.field}, {c.place})"
-  build oracle := do
+  build _ := do
     let (pick, field, place) ← Gen.zip (Gen.nat (.constant 0 5))
       (Gen.zip (Gen.nat (.constant 0 3)) (Gen.nat (.constant 0 767)))
-    pure ⟨oracle, pick, field, place⟩
+    pure ⟨pick, field, place⟩
+  -- A signature made by then.
+  buildIn _ s := do
+    let (pick, field, place) ← Gen.zip (Gen.nat (.constant 0 (s.made.size - 1)))
+      (Gen.zip (Gen.nat (.constant 0 3)) (Gen.nat (.constant 0 767)))
+    pure ⟨pick, field, place⟩
 
 /-- Every registered key signs one message.
 
@@ -234,20 +298,22 @@ The oracle says so unless the public keys sum to infinity.
 
 The aggregate never verifies without its last signer. -/
 structure AggregateSame where
-  oracle : Oracle
   msg : ByteArray
 
 instance : Command AggregateSame Signers Oracle IO where
   check _ _ s := !s.keys.isEmpty
-  apply _ c s := do
+  apply oracle c s := do
     let keys := s.keys.toList
     let pks := keys.map pkOf
     let sig := aggregateOf keys (keys.map fun _ => c.msg)
     let words := [listWord (pks.map hex), hex c.msg, hex sig]
     let got := fastAggregateVerify (pks.map (vec 48)).toArray c.msg (vec 96 sig)
-    bit got === (← c.oracle.ask ("fastaggverify" :: words))
+    classify "one message: the aggregate of one key verifies" (got && keys.length == 1)
+    classify "one message: the aggregate of several keys verifies" (got && keys.length > 1)
+    classify "one message: the keys sum to infinity, refused" (!got)
+    bit got === (← oracle.ask ("fastaggverify" :: words))
     bit (ethFastAggregateVerify (pks.map (vec 48)).toArray c.msg (vec 96 sig)) ===
-      (← c.oracle.ask ("ethfastaggverify" :: words))
+      (← oracle.ask ("ethfastaggverify" :: words))
     -- The model: the keys are known, so their sum mod `r` says whether the key is infinity.
     got === (keys.foldl (· + ·) 0 % r != 0)
     let fewer := (pks.dropLast.map (vec 48)).toArray
@@ -257,32 +323,36 @@ instance : Command AggregateSame Signers Oracle IO where
     let sum := match ethAggregatePubkeys (pks.map (vec 48)).toArray with
       | .ok pk => hexVec pk
       | .error _ => "error"
-    sum === (← c.oracle.ask ["ethaggpk", listWord (pks.map hex)])
+    sum === (← oracle.ask ["ethaggpk", listWord (pks.map hex)])
     pure s
   label c := s!"AGGREGATE_SAME({hex c.msg})"
-  build oracle := AggregateSame.mk oracle <$> genBytes (.linear 0 8)
+  build _ := AggregateSame.mk <$> genBytes (.linear 0 8)
 
 /-- The signatures made so far aggregate, and the aggregate verifies on their messages. -/
 structure AggregateMade where
-  oracle : Oracle
 
 instance : Command AggregateMade Signers Oracle IO where
   check _ _ s := !s.made.isEmpty
-  apply _ c s := do
+  apply oracle _ s := do
     let made := s.made.toList
     let pks := made.map fun (index, _, _) => pkOf s.keys[index]!
     let msgs := made.map (·.2.1)
     let sig := match aggregate (made.map fun (_, _, sig) => vec 96 sig).toArray with
       | .ok sig => ByteArray.mk sig.toArray
       | .error _ => ByteArray.empty
-    hex sig === (← c.oracle.ask ["aggregate", listWord (made.map fun (_, _, sig) => hex sig)])
+    hex sig === (← oracle.ask ["aggregate", listWord (made.map fun (_, _, sig) => hex sig)])
     let got := aggregateVerify (pks.map (vec 48)).toArray msgs.toArray (vec 96 sig)
-    bit got === (← c.oracle.ask ["aggverify", listWord (pks.map hex), listWord (msgs.map hex),
+    bit got === (← oracle.ask ["aggverify", listWord (pks.map hex), listWord (msgs.map hex),
       hex sig])
     ensure got "an honest aggregate is refused"
+    classify "several messages: an aggregate of one signature" (made.length == 1)
+    classify "several messages: an aggregate of two or more" (made.length > 1)
+    classify "several messages: one message twice" ((msgs.map hex).eraseDups.length <
+      msgs.length)
+    classify "several messages: one key twice" ((pks.map hex).eraseDups.length < pks.length)
     pure s
   label _ := "AGGREGATE_MADE"
-  build oracle := pure ⟨oracle⟩
+  build _ := pure {}
 
 /-- No signer at all: Ethereum accepts the signature of infinity, the draft accepts nothing. -/
 structure EmptySet where
@@ -295,16 +365,22 @@ instance : Command EmptySet Signers Oracle IO where
     ensure (!aggregateVerify #[] #[] G2_POINT_AT_INFINITY) "an empty aggregate verifies"
     for (_, _, sig) in s.made do
       ensure (!ethFastAggregateVerify #[] c.msg (vec 96 sig)) "the empty set signs"
+    label "the empty set"
+    classify "the empty set against signatures made" (!s.made.isEmpty)
     pure s
   label c := s!"EMPTY_SET({hex c.msg})"
   build _ := EmptySet.mk <$> genBytes (.linear 0 4)
 
 /-- The signers, in random order: no command is special, and each must hold in every state. -/
 def signers (oracle : Oracle) (mode : Mode) : Property IO :=
+  -- A sequence has 8 to 20 commands at every size.
+  --
+  -- A short one registers no key, and then every other command is skipped.
   scenario mode oracle [
     Command.gen Register, Command.gen Sign, Command.gen RegisterOpposite, Command.gen Tamper,
     Command.gen AggregateSame, Command.gen AggregateMade, Command.gen EmptySet,
-    Command.gen Sign, Command.gen Tamper]
+    Command.gen Sign, Command.gen Tamper, Command.gen Register, Command.gen AggregateSame,
+    Command.gen AggregateMade] (.constant 8 20)
 
 /-! ## A store of blobs -/
 
@@ -331,58 +407,70 @@ structure Env where
 
 /-- Store a blob: its commitment, proof and cells are c-kzg's. -/
 structure AddBlob where
-  env : Env
   spec : BlobSpec
 
 instance : Command AddBlob Store Env IO where
   check _ _ s := s.blobs.size < 3
-  apply _ c s := do
+  apply env c s := do
     let blob := c.spec.blob
-    let .ok commitment := blobToKzgCommitment c.env.setup blob | failWith "no commitment"
-    let .ok proof := computeBlobKzgProof c.env.setup blob commitment | failWith "no proof"
-    let .ok (cells, proofs) := computeCellsAndKzgProofs c.env.setup blob | failWith "no cells"
-    hexVec commitment === (← c.env.oracle.ask ["kzgcommit", blobHex c.spec])
-    hexVec proof === (← c.env.oracle.ask ["kzgblobproof", blobHex c.spec, hexVec commitment])
-    s!"{digest cells} {digest proofs}" === (← c.env.oracle.ask ["kzgcells", blobHex c.spec])
+    let .ok commitment := blobToKzgCommitment env.setup blob | failWith "no commitment"
+    let .ok proof := computeBlobKzgProof env.setup blob commitment | failWith "no proof"
+    let .ok (cells, proofs) := computeCellsAndKzgProofs env.setup blob | failWith "no cells"
+    hexVec commitment === (← env.oracle.ask ["kzgcommit", blobHex c.spec])
+    hexVec proof === (← env.oracle.ask ["kzgblobproof", blobHex c.spec, hexVec commitment])
+    s!"{digest cells} {digest proofs}" === (← env.oracle.ask ["kzgcells", blobHex c.spec])
+    label "a blob is stored"
+    classify "a second blob or a third is stored" (!s.blobs.isEmpty)
+    classify "a blob is stored twice" (s.blobs.any (·.commitment == commitment))
+    classify "a constant blob is stored, whose proof is the point at infinity"
+      (proof == Bls.G1.infinityBytes)
     pure { s with blobs := s.blobs.push ⟨c.spec, commitment, proof, cells, proofs⟩ }
   label c := s!"ADD_BLOB({repr c.spec})"
-  build env := AddBlob.mk env <$> genBlob false
+  build _ := AddBlob.mk <$> genBlob false
+  -- Only the count matters to the commands built after this one.
+  next _ c s := if s.blobs.size < 3
+    then { s with blobs := s.blobs.push { (default : Stored) with spec := c.spec } } else s
+  -- A blob stored before comes again now and then: one commitment twice in a batch.
+  buildIn _ s := AddBlob.mk <$> Gen.frequency ([(5, genBlob false)] ++
+    (if s.blobs.isEmpty then [] else [(1, Gen.element (s.blobs.toList.map (·.spec)))]))
 
 /-- Every stored blob verifies in one batch.
 
 With two proofs exchanged the batch verifies exactly when the two are equal. -/
 structure VerifyAll where
-  env : Env
   swap : Bool
 
 instance : Command VerifyAll Store Env IO where
-  apply _ c s := do
+  apply env c s := do
     let blobs := s.blobs.map (·.spec.blob)
     let commitments := s.blobs.map (·.commitment)
     let proofs := s.blobs.map (·.proof)
     let proofs := if c.swap && proofs.size ≥ 2 then
       (proofs.set! 0 proofs[1]!).set! 1 proofs[0]! else proofs
     let honest := !(c.swap && proofs.size ≥ 2) || proofs[0]! == proofs[1]!
-    let got := verifyBlobKzgProofBatch c.env.setup blobs commitments proofs
-    verdict got === (← c.env.oracle.ask ["kzgverifybatch", listWord (blobs.toList.map hexVec),
+    let got := verifyBlobKzgProofBatch env.setup blobs commitments proofs
+    verdict got === (← env.oracle.ask ["kzgverifybatch", listWord (blobs.toList.map hexVec),
       listWord (commitments.toList.map hexVec), listWord (proofs.toList.map hexVec)])
     -- Two equal proofs of different blobs can only be those of two constant blobs.
     if honest then verdict got === "1"
+    classify "batch: no blob" blobs.isEmpty
+    classify "batch: one blob verifies" (blobs.size == 1)
+    classify "batch: two or three blobs verify" (blobs.size ≥ 2 && got.toOption == some true)
+    classify "batch: two proofs exchanged, refused" (got.toOption == some false)
     pure s
   label c := s!"VERIFY_ALL({c.swap})"
-  build env := VerifyAll.mk env <$> Gen.bool
+  build _ := VerifyAll.mk <$> Gen.bool
 
 /-- A sample of cells across the stored blobs verifies.
 
 With one cell index moved the sample verifies only as c-kzg says. -/
 structure Sample where
-  env : Env
   picks : List (Nat × Nat)
   move : Bool
 
 instance : Command Sample Store Env IO where
   check _ _ s := !s.blobs.isEmpty
-  apply _ c s := do
+  apply env c s := do
     let rows := c.picks.map fun (b, i) =>
       let stored := s.blobs[b % s.blobs.size]!
       (stored.commitment, i, stored.cells[i]!, stored.proofs[i]!)
@@ -390,72 +478,89 @@ instance : Command Sample Store Env IO where
     let indices := match c.move, indices with
       | true, i :: rest => (i + 1) % 128 :: rest
       | _, is => is
-    let got := verifyCellKzgProofBatch c.env.setup (rows.map (·.1)).toArray indices.toArray
+    let got := verifyCellKzgProofBatch env.setup (rows.map (·.1)).toArray indices.toArray
       (rows.map (·.2.2.1)).toArray (rows.map (·.2.2.2)).toArray
-    verdict got === (← c.env.oracle.ask ["kzgverifycells",
+    classify "sample: no cell" rows.isEmpty
+    classify "sample: cells verify" (!rows.isEmpty && got.toOption == some true)
+    classify "sample: cells of two or three blobs verify" (got.toOption == some true &&
+      (rows.map fun row => hexVec row.1).eraseDups.length > 1)
+    classify "sample: a moved index, refused" (got.toOption == some false)
+    verdict got === (← env.oracle.ask ["kzgverifycells",
       listWord (rows.map fun row => hexVec row.1), listWord (indices.map toString),
       listWord (rows.map fun row => hexVec row.2.2.1),
       listWord (rows.map fun row => hexVec row.2.2.2)])
     if !c.move || rows.isEmpty then verdict got === "1"
     pure s
   label c := s!"SAMPLE({c.picks}, {c.move})"
-  build env := do
+  build _ := do
     let picks ← Gen.list (.linear 0 6) (Gen.zip (Gen.nat (.constant 0 2)) (Gen.nat
         (.constant 0 127)))
-    Sample.mk env picks <$> Gen.bool
+    Sample.mk picks <$> Gen.bool
+  -- Cells of the blobs stored by then, a few of them, at any index and at the two ends.
+  buildIn _ s := do
+    let cell := Gen.frequency [(1, pure 0), (1, pure 127), (4, Gen.nat (.constant 0 127))]
+    let picks ← Gen.frequency [(1, pure []), (6, Gen.list (.constant 1 6)
+      (Gen.zip (Gen.nat (.constant 0 (s.blobs.size - 1))) cell))]
+    Sample.mk picks <$> Gen.bool
 
 /-- Lose up to half of the cells of a blob: recovery gives back the cells and proofs stored.
 
 With one cell more lost, recovery fails. -/
 structure LoseAndRecover where
-  env : Env
   pick : Nat
   kept : List Nat
 
 instance : Command LoseAndRecover Store Env IO where
   check _ _ s := !s.blobs.isEmpty
-  apply _ c s := do
+  apply env c s := do
     let stored := s.blobs[c.pick % s.blobs.size]!
     let cells := c.kept.map fun i => stored.cells[i]!
-    match recoverCellsAndKzgProofs c.env.setup c.kept.toArray cells.toArray with
+    match recoverCellsAndKzgProofs env.setup c.kept.toArray cells.toArray with
     | .ok (all, proofs) =>
       ensure (c.kept.length ≥ 64) "recovery from fewer than half of the cells"
       ensure (all == stored.cells && proofs == stored.proofs) "recovery gives other cells"
-    | .error _ => ensure (c.kept.length < 64) "recovery from half of the cells fails"
+      classify "recovered from exactly 64 cells" (c.kept.length == 64)
+      classify "recovered from more than 64 cells" (c.kept.length > 64)
+    | .error _ =>
+      ensure (c.kept.length < 64) "recovery from half of the cells fails"
+      label "recovery refused: 63 cells"
     pure s
   label c := s!"LOSE_AND_RECOVER({c.pick}, {c.kept})"
-  build env := do
+  build _ := do
     let kept ← Gen.frequency [
       (3, Gen.filter (·.length ≥ 64) (Gen.subsequence (List.range 128))),
       (1, (fun k => (List.range 128).drop k |>.take 64) <$> Gen.nat (.constant 0 64)),
       (1, (fun k => (List.range 128).drop k |>.take 63) <$> Gen.nat (.constant 0 65))]
-    (LoseAndRecover.mk env · kept) <$> Gen.nat (.constant 0 2)
+    (LoseAndRecover.mk · kept) <$> Gen.nat (.constant 0 2)
 
 /-- Open a stored blob at a point: the proof verifies for its value and for no other. -/
 structure OpenPoint where
-  env : Env
   pick : Nat
   z : Nat
 
 instance : Command OpenPoint Store Env IO where
   check _ _ s := !s.blobs.isEmpty
-  apply _ c s := do
+  apply env c s := do
     let stored := s.blobs[c.pick % s.blobs.size]!
     let z := vec32 (c.z % KzgTest.r)
-    let .ok (proof, y) := computeKzgProof c.env.setup stored.spec.blob z | failWith "no proof"
-    s!"{hexVec proof} {hexVec y}" === (← c.env.oracle.ask ["kzgproof", blobHex stored.spec,
+    let .ok (proof, y) := computeKzgProof env.setup stored.spec.blob z | failWith "no proof"
+    s!"{hexVec proof} {hexVec y}" === (← env.oracle.ask ["kzgproof", blobHex stored.spec,
       hexVec z])
-    verdict (verifyKzgProof c.env.setup stored.commitment z y proof) === "1"
+    verdict (verifyKzgProof env.setup stored.commitment z y proof) === "1"
     let other := vec32 ((beNat ⟨y.toArray⟩ + 1) % KzgTest.r)
-    verdict (verifyKzgProof c.env.setup stored.commitment z other proof) === "0"
+    verdict (verifyKzgProof env.setup stored.commitment z other proof) === "0"
+    classify "opened at a root of unity of the domain" (modPow KzgTest.r c.z 4096 == 1)
+    classify "opened outside the domain" (modPow KzgTest.r c.z 4096 != 1)
     pure s
   label c := s!"OPEN_POINT({c.pick}, {c.z})"
-  build env := Gen.zipWith (OpenPoint.mk env) (Gen.nat (.constant 0 2)) genZ
+  build _ := Gen.zipWith OpenPoint.mk (Gen.nat (.constant 0 2)) genZ
 
 /-- The store, in random order. -/
 def store (env : Env) (mode : Mode) : Property IO :=
+  -- A sequence of 5 to 10 commands at every size, with a blob stored in one command of three.
   scenario mode env [
     Command.gen AddBlob, Command.gen VerifyAll, Command.gen Sample, Command.gen LoseAndRecover,
-    Command.gen OpenPoint, Command.gen AddBlob]
+    Command.gen OpenPoint, Command.gen AddBlob, Command.gen AddBlob, Command.gen VerifyAll,
+    Command.gen Sample] (.constant 5 10)
 
 end CurvesProperty.Machines

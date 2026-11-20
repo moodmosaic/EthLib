@@ -1,7 +1,8 @@
 """BLS12-381 and alt_bn128 references: py_ecc, arkworks and milagro."""
 
-# A point of G1 is `x,y` and a point of G2 is `x0,x1,y0,y1`, in decimal; `inf`
-# is the point at infinity.  A list is its items joined by `;`, or `[]`.
+# A point of G1 is `x,y` and a point of G2 is `x0,x1,y0,y1`, in decimal.
+# `inf` is the point at infinity.
+# A list is its items joined by `;`, or `[]`.
 
 import hashlib
 import hmac
@@ -161,6 +162,10 @@ def hash_to_g2(msg, dst):
 def map_fp(u):
     pt = h2c.clear_cofactor_G1(h2c.map_to_curve_G1(bls.FQ(u)))
     other = ark_show(ark.G1Point.map_from_fp_be(u.to_bytes(48, "big")), 48)
+    # In the kernel of the isogeny arkworks answers (0, 0), which is no point: py_ecc decides.
+    if bls.is_inf(pt):
+        assert other in ("inf", "0,0"), "py_ecc and arkworks disagree at the identity"
+        return "inf"
     assert show1(pt) == other, "py_ecc and arkworks disagree"
     return other
 
