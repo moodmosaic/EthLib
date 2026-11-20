@@ -28,11 +28,70 @@ def eelsForks : List (Fork × String) := [
   (.shapella, "shanghai"), (.dencun, "cancun"), (.pectra, "prague"), (.fusaka, "osaka"),
   (.bpo1, "bpo1"), (.bpo2, "bpo2")]
 
-/-- A fork of the reference, the later ones as often as the earlier. -/
-def genFork : Gen (Fork × String) := Gen.element eelsForks
+/-- The forks of EthLib that the reference has no module for, each beside a fork of its rules.
 
-/-- The forks of the reference before Paris, which have a difficulty. -/
-def genWorkFork : Gen (Fork × String) := Gen.element (eelsForks.take 13)
+Constantinople has the rules of Petersburg in EthLib, as the reference names them.
+
+The three forks of the consensus layer change no rule of the execution layer. -/
+def sameRuleForks : List (Fork × String) := [
+  (.constantinople, "constantinople"), (.phase0, "muir_glacier"), (.altair, "london"),
+  (.bellatrix, "gray_glacier")]
+
+/-- The forks that the released reference answers for: its own 20, and the four beside them. -/
+def releaseForks : List (Fork × String) := eelsForks ++ sameRuleForks
+
+/-- The forks that only the branch `forks/amsterdam` of execution-specs has.
+
+Hegotá has no rule of its own yet, so it stands beside Amsterdam. -/
+def lateForks : List (Fork × String) := [
+  (.bpo3, "bpo3"), (.bpo4, "bpo4"), (.bpo5, "bpo5"), (.glamsterdam, "amsterdam"),
+  (.hegota, "amsterdam")]
+
+/-- The reference processes: the release, and the later branch where it is installed. -/
+structure Oracles where
+  /-- execution-specs as released, with every fork from Frontier to BPO2. -/
+  main : Oracle
+  /-- The branch `forks/amsterdam`, or none where it is not installed. -/
+  late : Option Oracle
+
+/-- The forks that the references answer for: every fork of EthLib where both are there. -/
+def Oracles.forks (oracles : Oracles) : List (Fork × String) :=
+  releaseForks ++ (if oracles.late.isSome then lateForks else [])
+
+/-- The reference that answers for a fork. -/
+def Oracles.at (oracles : Oracles) (fork : Fork × String) : Oracle :=
+  if lateForks.any fun late => late.1 == fork.1 then oracles.late.getD oracles.main
+  else oracles.main
+
+/-- The family of a fork: the forks between two changes of the formats that this driver reads. -/
+def forkFamily (fork : Fork) : String :=
+  if fork < .homestead then "Frontier"
+  else if fork < .spuriousDragon then "Homestead to Tangerine Whistle"
+  else if fork < .byzantium then "Spurious Dragon"
+  else if fork < .berlin then "Byzantium to Muir Glacier"
+  else if fork < .london then "Berlin"
+  else if fork < .paris then "London to Gray Glacier"
+  else if fork < .shapella then "Paris"
+  else if fork < .dencun then "Shapella"
+  else if fork < .pectra then "Dencun"
+  else if fork < .fusaka then "Pectra"
+  else if fork < .glamsterdam then "Fusaka to BPO5"
+  else "Glamsterdam on"
+
+/-- A fork of a list: a family first, each as often as another, then a fork of the family.
+
+So Pectra, which is one fork, is drawn as often as the seven forks from Byzantium to Phase 0. -/
+def genForkOf (forks : List (Fork × String)) : Gen (Fork × String) :=
+  let families := (forks.map fun fork => forkFamily fork.1).eraseDups
+  Gen.choice (families.map fun family =>
+    Gen.element (forks.filter fun fork => forkFamily fork.1 == family))
+
+/-- A fork that the released reference answers for. -/
+def genFork : Gen (Fork × String) := genForkOf releaseForks
+
+/-- A fork before Paris, which has a difficulty. -/
+def genWorkFork : Gen (Fork × String) :=
+  genForkOf (releaseForks.filter fun fork => fork.1 < .paris)
 
 /-- The order of the group of secp256k1. -/
 def curveOrder : Nat := 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141
@@ -120,5 +179,36 @@ def orError {ε : Type} (result : Except ε String) : String :=
   match result with
   | .ok text => text
   | .error _ => "error"
+
+/-- The name of the constructor of an error: the last word of its head, as `Repr` writes it. -/
+def errorName {ε : Type} [Repr ε] (error : ε) : String :=
+  let text := (reprStr error).toList.dropWhile (· == '(')
+  let head := String.ofList (text.takeWhile fun c => c.isAlphanum || c == '.' || c == '_')
+  (head.splitOn ".").getLastD head
+
+/-- Whether a run is long enough for the minimums of `coverMin`, which `main` sets.
+
+A share depends on the number of cases, and a run of 100 cases has only small ones. -/
+initialize longRun : IO.Ref Bool ← IO.mkRef false
+
+/-- Count the case under the name when covered, and in a long run require a share of the cases.
+
+The minimums are about a third of the shares of a run of 1,000 cases. -/
+def coverMin (minimum : Nat) (name : String) (covered : Bool) : TestT IO Unit := do
+  if ← longRun.get then cover minimum name covered else classify name covered
+
+/-- Count the case under one name, and require a share of the cases for each name of a list.
+
+A name outside the list is counted with no minimum. -/
+def coverOne (minimum : Nat) (names : List String) (name : String) :
+    TestT IO Unit := do
+  for other in names do
+    coverMin minimum other (other == name)
+  unless names.contains name do
+    label name
+
+/-- Count the case under the name of its fork family. -/
+def labelFork (fork : Fork) : TestT IO Unit :=
+  label s!"fork: {forkFamily fork}"
 
 end ExecutionProperty

@@ -18,3 +18,6 @@ hexbytes==2.0.0
 bitarray==3.12.4
 sortedcontainers==2.4.0
 ruff==0.17.5
+# BPO3 to Hegotá: oracle/execution_amsterdam.py runs the branch forks/amsterdam of EELS, which
+# oracle/requirements-evm.txt installs under .venv/evm-amsterdam.
+# Without it the driver skips those forks and says so.

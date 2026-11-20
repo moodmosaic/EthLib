@@ -1,14 +1,24 @@
 """References for the execution chain: one command per line, one answer per line."""
 
-# The words of a command are separated by tabs, bytes are in hexadecimal and `-`
-# is the empty byte string.  Most answers come from execution-specs (EELS), the
-# others from py-trie, eth-bloom, eth-account and hashlib.
+# The words of a command are separated by tabs.
+# Bytes are in hexadecimal and `-` is the empty byte string.
+# Most answers come from execution-specs (EELS).
+# The others come from py-trie, eth-bloom, eth-account and hashlib.
 #
 #     tx <fork> <chain> <bytes>        A transaction as bytes: its hash, sender,
 #                                      intrinsic gas, floor and validity.
-#     signed <chain> <key> <kind> ...  A transaction signed by eth-account.
+#     txbody <fork> <bytes>            A transaction as an item of a block body.
+#     signed <kind> <key> <fields>     A transaction signed by eth-account.
+#     authority <bytes>                The authority of an authorization.
+#     hp <nibbles> <leaf>              The hex-prefix encoding of a path.
+#     trieroot, trieroothash, trieproof, trieverify, sm_trie
+#                                      Tries of EELS and of py-trie.
+#     bloom, header, headerpair, headeracross, ommers, receipt, difficulty, reward,
+#     requestshash, deposit, withdrawalsroot, indexroot, dao, state
+#                                      Blocks and the state, each as its docstring says.
 
 import importlib
+import inspect
 import os
 import sys
 
@@ -66,6 +76,11 @@ def since(fork, other):
     return FORKS.index(fork) >= FORKS.index(other)
 
 
+def arity(function):
+    """How many arguments a function of a fork takes: the branches of EELS differ in it."""
+    return len(inspect.signature(function).parameters)
+
+
 def decode_tx(fork, data):
     """The transaction of the bytes at a fork, as EELS reads a block body."""
     txs = module(fork, "transactions")
@@ -105,18 +120,27 @@ def tx_sender(fork, chain, tx):
         # EIP-2930: "the chainId must match", which EELS leaves to its tests.
         if tx_type(tx) and int(tx.chain_id) != chain:
             return None
-        if since(fork, "spurious_dragon"):
+        if arity(txs.recover_sender) == 2:
             return txs.recover_sender(U64(chain), tx)
+        if hasattr(txs, "chain_id"):
+            # A later branch reads the chain of a legacy transaction apart.
+            # Its caller compares that chain with the chain of the block.
+            signed = txs.chain_id(tx)
+            if signed is not None and int(signed) != chain:
+                return None
         return txs.recover_sender(tx)
     except Exception:
         return None
 
 
-def tx_valid(fork, tx):
+def tx_valid(fork, tx, sender):
     """Whether the rules that read no state accept the transaction."""
     txs = module(fork, "transactions")
     try:
-        txs.validate_transaction(tx)
+        if arity(txs.validate_transaction) == 2:
+            txs.validate_transaction(tx, sender)
+        else:
+            txs.validate_transaction(tx)
     except Exception:
         return False
     kind = tx_type(tx)
@@ -143,15 +167,26 @@ def tx(fork, chain, data):
         decoded = decode_tx(fork, unhex(data))
     except Exception:
         return "error"
-    # EELS types the gas and the fees as unbounded integers; the Yellow Paper
-    # (4.2) bounds each below 2^256, and no balance pays for more.
+    # EELS types the gas and the fees as unbounded integers.
+    # The Yellow Paper (4.2) bounds each below 2^256, and no balance pays for more.
     names = ("gas", "gas_price", "max_fee_per_gas", "max_priority_fee_per_gas")
     if any(int(getattr(decoded, name, 0)) >= 2**256 for name in names):
         return "error"
     txs = module(fork, "transactions")
-    cost = txs.calculate_intrinsic_cost(decoded)
-    intrinsic, floor = cost if isinstance(cost, tuple) else (cost, 0)
     sender = tx_sender(fork, int(chain), decoded)
+    # From Glamsterdam the intrinsic gas reads the sender; with no sender, the zero address.
+    who = sender or bytes(20)
+    if arity(txs.calculate_intrinsic_cost) == 2:
+        cost = txs.calculate_intrinsic_cost(decoded, who)
+    else:
+        cost = txs.calculate_intrinsic_cost(decoded)
+    if isinstance(cost, tuple):
+        intrinsic, floor = cost
+    elif hasattr(cost, "calldata_floor"):
+        intrinsic = cost.execution if hasattr(cost, "execution") else cost.regular
+        floor = cost.calldata_floor
+    else:
+        intrinsic, floor = cost, 0
     return " ".join(
         [
             "ok",
@@ -159,9 +194,43 @@ def tx(fork, chain, data):
             tohex(sender) if sender else "badsig",
             str(int(intrinsic)),
             str(int(floor)),
-            "true" if tx_valid(fork, decoded) else "false",
+            "true" if tx_valid(fork, decoded, who) else "false",
         ]
     )
+
+
+@command
+def txbody(fork, data):
+    """A transaction as an item of a block body: a list, or the bytes of a typed one."""
+    import rlp as pyrlp
+
+    txs = module(fork, "transactions")
+    try:
+        item = pyrlp.decode(unhex(data))
+        if isinstance(item, list):
+            legacy = getattr(txs, "LegacyTransaction", None) or txs.Transaction
+            decoded = rlp.decode_to(legacy, unhex(data))
+        elif not hasattr(txs, "decode_transaction"):
+            raise ValueError("typed transaction before Berlin")
+        else:
+            decoded = txs.decode_transaction(Bytes(item))
+    except Exception:
+        return "error"
+    names = ("gas", "gas_price", "max_fee_per_gas", "max_priority_fee_per_gas")
+    if any(int(getattr(decoded, name, 0)) >= 2**256 for name in names):
+        return "error"
+    return "ok " + tohex(tx_hash(fork, decoded))
+
+
+@command
+def authority(data):
+    """The authority of an authorization of EIP-7702 as EELS recovers it, or `error`."""
+    types = module("prague", "fork_types")
+    delegation = importlib.import_module("ethereum.forks.prague.vm.eoa_delegation")
+    try:
+        return tohex(delegation.recover_authority(rlp.decode_to(types.Authorization, unhex(data))))
+    except Exception:
+        return "error"
 
 
 def big(data):
@@ -249,6 +318,30 @@ def trieroot(secured, *entries):
     return tohex(trie.root(t))
 
 
+def sha256(data):
+    import hashlib
+
+    return hashlib.sha256(data).digest()
+
+
+HASHES = {"sha256": sha256, "prefixed": lambda data: keccak256(b"\x01" + data)}
+
+
+@command
+def trieroothash(name, secured, *entries):
+    """The root of EELS for the entries, with another hash in place of Keccak-256."""
+    trie = module("osaka", "trie")
+    saved = trie.keccak256
+    trie.keccak256 = HASHES[name]
+    try:
+        t = trie.Trie(secured=secured == "1", default=b"")
+        for key, value in pairs(entries):
+            trie.trie_set(t, key, value)
+        return tohex(trie.root(t))
+    finally:
+        trie.keccak256 = saved
+
+
 def hexary(entries):
     from trie import HexaryTrie
 
@@ -282,6 +375,14 @@ def trieverify(root, key, *nodes):
     except Exception:
         return "error"
     return tohex(value) if value else "absent"
+
+
+@command
+def hp(nibbles, leaf):
+    """The hex-prefix encoding of EELS, of a path with one hexadecimal digit for each nibble."""
+    trie = module("osaka", "trie")
+    path = b"" if nibbles == "-" else bytes(int(digit, 16) for digit in nibbles)
+    return tohex(trie.nibble_list_to_compact(path, leaf == "1"))
 
 
 MACHINES = {}
@@ -337,7 +438,7 @@ def header(fork, data):
     except Exception:
         return "error"
     fields = [h.difficulty, h.number, h.gas_limit, h.gas_used, h.timestamp]
-    for name in ("base_fee_per_gas", "blob_gas_used", "excess_blob_gas"):
+    for name in ("base_fee_per_gas", "blob_gas_used", "excess_blob_gas", "slot_number"):
         if hasattr(h, name):
             fields.append(getattr(h, name))
     words = ["ok", tohex(keccak256(rlp.encode(h)))] + [str(int(x)) for x in fields]
@@ -363,6 +464,59 @@ def headerpair(fork, parent, child):
         rules.validate_header(chain, c)
     except Exception as error:
         return f"error {type(error).__name__}"
+    return "ok"
+
+
+@command
+def headeracross(parent_fork, fork, parent, child):
+    """Whether a header may follow a parent of the fork before it, the seal aside.
+
+    It is `validate_header` of the fork of the header, with two rules of the EIPs added.
+    EIP-1559: at the first London block the gas limit of the parent counts twice.
+    EIP-4844: the excess reads the blob gas of every parent that has it.
+    """
+    import dataclasses
+    from types import SimpleNamespace
+
+    from ethereum.fork_criteria import ByBlockNumber
+
+    before = module(parent_fork, "blocks")
+    blocks = module(fork, "blocks")
+    rules = module(fork, "fork")
+    try:
+        p = rlp.decode_to(before.Header, unhex(parent))
+        c = rlp.decode_to(blocks.Header, unhex(child))
+    except Exception:
+        return "undecodable"
+    if hasattr(rules, "validate_proof_of_work"):
+        rules.validate_proof_of_work = lambda header: None
+    old = [f.name for f in dataclasses.fields(before.Header)]
+    new = [f.name for f in dataclasses.fields(blocks.Header)]
+    saved = getattr(rules, "FORK_CRITERIA", None)
+    if fork == "london" and "base_fee_per_gas" not in old:
+        # EELS takes the first London block by its number, and does not check its gas limit.
+        limit = int(p.gas_limit) * 2
+        if not limit - limit // 1024 < int(c.gas_limit) < limit + limit // 1024:
+            return "error gas limit"
+        if int(c.gas_limit) < 5000:
+            return "error gas limit"
+        rules.FORK_CRITERIA = ByBlockNumber(int(c.number))
+    elif "excess_blob_gas" in old and before.Header is not blocks.Header:
+        # EELS reads the blob gas of a parent only when the parent has the type of the fork.
+        # So the parent is written again as a header of the fork, and the child names it.
+        true_hash = keccak256(rlp.encode(p))
+        values = {name: getattr(p, name) if name in old else bytes(32) for name in new}
+        p = blocks.Header(**values)
+        if c.parent_hash == true_hash:
+            c = dataclasses.replace(c, parent_hash=keccak256(rlp.encode(p)))
+    chain = SimpleNamespace(blocks=[SimpleNamespace(header=p)])
+    try:
+        rules.validate_header(chain, c)
+    except Exception as error:
+        return f"error {type(error).__name__}"
+    finally:
+        if saved is not None:
+            rules.FORK_CRITERIA = saved
     return "ok"
 
 
@@ -633,23 +787,29 @@ def state(name, *args):
     return " ".join(MACHINES["state"].run(name, *args))
 
 
-# With EXECUTION_ORACLE_STATS set, count the answers of each command, to see
-# how many inputs of a generator the reference accepts.
+# With EXECUTION_ORACLE_STATS set, count the answers of each command.
+# The counts show how many inputs of a generator the reference accepts.
 STATS = {}
 
-for line in sys.stdin:
-    words = line.rstrip("\n").split("\t")
-    try:
-        answer = COMMANDS[words[0]](*words[1:])
-    except Exception as error:
-        answer = f"error {type(error).__name__} {error}".replace("\n", " ")
-    try:
-        print(answer or "-", flush=True)
-    except BrokenPipeError:
-        break
-    kind = (words[0], "error" if answer.startswith("error") else "ok")
-    STATS[kind] = STATS.get(kind, 0) + 1
 
-if os.environ.get("EXECUTION_ORACLE_STATS"):
-    for kind, count in sorted(STATS.items()):
-        print(*kind, count, file=sys.stderr)
+def main():
+    """Answer each line of the input, until it ends."""
+    for line in sys.stdin:
+        words = line.rstrip("\n").split("\t")
+        try:
+            answer = COMMANDS[words[0]](*words[1:])
+        except Exception as error:
+            answer = f"error {type(error).__name__} {error}".replace("\n", " ")
+        try:
+            print(answer or "-", flush=True)
+        except BrokenPipeError:
+            break
+        kind = (words[0], "error" if answer.startswith("error") else "ok")
+        STATS[kind] = STATS.get(kind, 0) + 1
+    if os.environ.get("EXECUTION_ORACLE_STATS"):
+        for kind, count in sorted(STATS.items()):
+            print(*kind, count, file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

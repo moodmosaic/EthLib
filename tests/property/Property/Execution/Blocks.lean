@@ -16,10 +16,21 @@ abbrev TxLog := Execution.Blocks.Log
 
 /-! ## The logs bloom -/
 
-/-- A log: an address, at most four topics, and data. -/
+/-- A log: an address, at most four topics, and data.
+
+Each count of topics from 0 to 4 is as common as another.
+
+Half the addresses and topics are any bytes, so that an entry sets any bit of the filter. -/
 def genLog : Gen TxLog :=
-  Execution.Blocks.Log.mk <$> genAddress <*> Gen.list (.linear 0 4) genWord <*>
+  let address := Gen.frequency [(1, genAddress), (1, genVector 20)]
+  let topic := Gen.frequency [(1, genWord), (1, genVector 32)]
+  Execution.Blocks.Log.mk <$> address <*> Gen.list (.constant 0 4) topic <*>
     genBytes (.linear 0 40)
+
+/-- A few logs: none now and then, mostly one to six. -/
+def genLogs : Gen (List TxLog) :=
+  Gen.frequency [(1, pure []), (2, Gen.list (.singleton 1) genLog),
+    (6, Gen.list (.constant 2 6) genLog)]
 
 /-- A log as a word of a command of the oracle. -/
 def logWord (log : TxLog) : String :=
@@ -34,13 +45,39 @@ def logItem (log : TxLog) : Item :=
 
 Every entry of the logs may be in the filter, and the filter of no log is all zero. -/
 def bloomFilter (oracle : Oracle) : Property IO := propertyM do
-  let logs ← forAllWith (fun logs => " ".intercalate (logs.map logWord))
-    (Gen.list (.linear 0 6) genLog)
+  let logs ← forAllWith (fun logs => " ".intercalate (logs.map logWord)) genLogs
+  let other ← forAllWith hex (Gen.frequency [(3, genBytes (.constant 20 32)),
+    (if logs.isEmpty then 0 else 1, Gen.element (logs.flatMap Bloom.entries))])
   pure do
+    label (if logs.isEmpty then "logs: 0" else if logs.length = 1 then "logs: 1" else "logs: 2+")
+    coverMin 13 "a log with no topic" (logs.any (·.topics.isEmpty))
+    coverMin 14 "a log with one topic" (logs.any (·.topics.length = 1))
+    coverMin 25 "a log with two topics or more" (logs.any (2 ≤ ·.topics.length))
+    coverMin 13 "a log with four topics" (logs.any (·.topics.length = 4))
+    let entries := (logs.flatMap Bloom.entries).map hex
+    let distinct := entries.eraseDups.length
+    label (if distinct = 0 then "distinct entries: 0" else if distinct ≤ 3 then
+      "distinct entries: 1 to 3" else if distinct ≤ 8 then "distinct entries: 4 to 8"
+      else "distinct entries: 9+")
+    coverMin 28 "an entry outside the seven fixed ones" (logs.any fun log =>
+      (log.address.toList.eraseDups.length > 1) || log.topics.any (·.toList.eraseDups.length > 1))
+    coverMin 13 "an entry twice" (distinct < entries.length)
     let expected ← oracle.ask ("bloom" :: logs.map logWord)
     hexV (logsBloom logs) === expected
     for entry in logs.flatMap Bloom.entries do
       ensure (Bloom.mayContain (Bloom.ofLogs logs) entry) "an entry of a log is not in the filter"
+    -- Another entry may be in the filter exactly when the bytes of the reference hold its bits.
+    --
+    -- Bit `k` of the filter is bit `k mod 8` of the byte `255 - k / 8`, as the Yellow Paper says.
+    let reference := (unhex? expected).getD .empty
+    let digest := keccak256 other
+    let bitsOf := [0, 2, 4].map fun i =>
+      (digest[i]!.toNat * 256 + digest[i + 1]!.toNat) % 2048
+    let held := bitsOf.all fun k =>
+      (reference.data.getD (255 - k / 8) 0).toNat / 2 ^ (k % 8) % 2 = 1
+    coverMin 7 "another entry: the filter holds its bits" held
+    coverMin 26 "another entry: the filter lacks a bit" (!held)
+    Bloom.mayContain (Bloom.ofLogs logs) other === held
     if logs.isEmpty then (logsBloom logs).toList === List.replicate 256 0
 
 /-! ## Headers -/
@@ -61,6 +98,7 @@ structure RawHeader where
   baseFee : Nat
   blobGasUsed : Nat
   excessBlobGas : Nat
+  slotNumber : Nat := 0
 
 /-- The item of a header at a fork: the fields that the fork has, in order. -/
 def RawHeader.item (fork : Fork) (h : RawHeader) : Item :=
@@ -72,7 +110,8 @@ def RawHeader.item (fork : Fork) (h : RawHeader) : Item :=
     ++ (if fork ≥ .london then [.scalar h.baseFee] else [])
     ++ (if fork ≥ .shapella then [word] else [])
     ++ (if fork ≥ .dencun then [.scalar h.blobGasUsed, .scalar h.excessBlobGas, word] else [])
-    ++ (if fork ≥ .pectra then [word] else []))
+    ++ (if fork ≥ .pectra then [word] else [])
+    ++ (if fork ≥ .glamsterdam then [word, .scalar h.slotNumber] else []))
 
 /-- The hash of the empty list of ommers. -/
 def emptyOmmers : ByteArray := ⟨(keccak256 ⟨#[0xc0]⟩).toArray⟩
@@ -102,7 +141,8 @@ def genRawHeader (fork : Fork) : Gen RawHeader := do
       (1, Gen.element [0, 1, 7, 8])]
     blobGasUsed := 131072 * (← Gen.nat (.constant 0 22))
     excessBlobGas := ← Gen.frequency [(2, (131072 * ·) <$> Gen.nat (.constant 0 400)),
-      (1, Gen.nat (.exponential 0 (2 ^ 40)))] }
+      (1, Gen.nat (.exponential 0 (2 ^ 40)))]
+    slotNumber := ← genNatNear 64 [2 ^ 64 - 1, 2 ^ 64] }
 
 /-- What EthLib says of the bytes of a header at a fork, in the words of the oracle. -/
 def describeHeader (fork : Fork) (bytes : ByteArray) : String :=
@@ -112,12 +152,13 @@ def describeHeader (fork : Fork) (bytes : ByteArray) : String :=
     let since := (if hh : Fork.london ≤ fork then [h.baseFeePerGas hh] else [])
       ++ (if hh : Fork.dencun ≤ fork then
         [(h.blobGasUsed hh).toNat, (h.excessBlobGas hh).toNat] else [])
+      ++ (if hh : Fork.glamsterdam ≤ fork then [(h.slotNumber hh).toNat] else [])
     let fields := [h.difficulty, h.number, h.gasLimit, h.gasUsed, h.timestamp.toNat] ++ since
     " ".intercalate (["ok", orError (hexV <$> h.hash)] ++ fields.map toString)
 
 /-- A header as bytes, almost valid, at a fork. -/
-def genHeaderBytes : Gen ((Fork × String) × ByteArray) := do
-  let fork ← genFork
+def genHeaderBytes (forks : List (Fork × String)) : Gen ((Fork × String) × ByteArray) := do
+  let fork ← genForkOf forks
   let header ← genRawHeader fork.1
   let wide ← Gen.frequency [(5, pure header),
     (1, (fun (n : Nat) => { header with blobGasUsed := n }) <$> Gen.element [2 ^ 64 - 1, 2 ^ 64]),
@@ -127,7 +168,7 @@ def genHeaderBytes : Gen ((Fork × String) × ByteArray) := do
   let mutations ← Gen.frequency [(2, pure []), (1, Gen.list (.constant 1 2) genMutation)]
   -- Now and then the fields of the next or the previous fork.
   let shape ← Gen.frequency [(8, pure fork.1),
-    (1, Gen.element [.london, .shapella, .dencun, .pectra, .grayGlacier])]
+    (1, Gen.element [.london, .shapella, .dencun, .pectra, .grayGlacier, .glamsterdam])]
   pure (fork, enc (mutateAll mutations (wide.item shape)))
 
 /-- EthLib and execution-specs agree on the bytes of a header.
@@ -135,100 +176,318 @@ def genHeaderBytes : Gen ((Fork × String) × ByteArray) := do
 They agree on whether the bytes hold a header of the fork.
 
 Then they agree on its hash and on the numbers that it holds. -/
-def headerBytes (oracle : Oracle) : Property IO := propertyM do
-  let (fork, bytes) ← forAllWith (fun (fork, bytes) => s!"{fork.2} {hex bytes}") genHeaderBytes
+def headerBytes (oracles : Oracles) : Property IO := propertyM do
+  let (fork, bytes) ← forAllWith (fun (fork, bytes) => s!"{fork.1.name} {hex bytes}")
+    (genHeaderBytes oracles.forks)
   pure do
-    describeHeader fork.1 bytes === (← oracle.ask ["header", fork.2, hex bytes])
+    labelFork fork.1
+    let count := match decode bytes with
+      | .ok (.list items) => some items.length
+      | _ => none
+    label (match count with
+      | none => "form: not a list"
+      | some n => if n = Header.fieldCount fork.1 then "form: the count of fields of the fork"
+        else if n < Header.fieldCount fork.1 then "form: fewer fields" else "form: more fields")
+    match (Codec.decode bytes : Except RlpError (Header fork.1)) with
+    | .ok h =>
+      label "verdict: a header"
+      coverMin 10 "a header with a base fee" (Fork.london ≤ fork.1)
+      coverMin 7 "a header with a withdrawals root" (Fork.shapella ≤ fork.1)
+      coverMin 5 "a header with blob gas" (Fork.dencun ≤ fork.1)
+      coverMin 4 "a header with a requests hash" (Fork.pectra ≤ fork.1)
+      coverMin 1 "a header with a block access list hash and a slot" (Fork.glamsterdam ≤ fork.1)
+      coverMin 4 "a header with a number of 2^64 or more"
+        (2 ^ 64 ≤ h.gasLimit || 2 ^ 64 ≤ h.difficulty || 2 ^ 64 ≤ h.timestamp.toNat)
+    | .error error => label s!"verdict: no header, {errorName error}"
+    describeHeader fork.1 bytes === (← (oracles.at fork).ask ["header", fork.2, hex bytes])
 
-/-- A number that is mostly the right one, and now and then one beside it. -/
-def genNear (right : Nat) : Gen Nat :=
-  Gen.frequency [(14, pure right), (1, pure (right + 1)), (1, pure (right - 1))]
+/-- The one thing wrong with a header after its parent, or nothing. -/
+inductive HeaderFault where
+  /-- Nothing: the header is valid. -/
+  | none
+  /-- The gas used is one above the gas limit. -/
+  | gasUsedAbove
+  /-- The gas limit is the first one too far above the parent's. -/
+  | gasLimitUp
+  /-- The gas limit is the first one too far below the parent's. -/
+  | gasLimitDown
+  /-- The gas limit is 4999, one below the least, after a parent at 5001. -/
+  | gasLimitFloor
+  /-- The base fee is one above the right one. -/
+  | baseFeeUp
+  /-- The base fee is one below the right one, or 2 where the right one is 0. -/
+  | baseFeeDown
+  /-- The timestamp is the parent's. -/
+  | sameTime
+  /-- The timestamp is one before the parent's. -/
+  | earlier
+  /-- The number is two above the parent's. -/
+  | numberUp
+  /-- The number is the parent's. -/
+  | numberSame
+  /-- The number is 0. -/
+  | genesis
+  /-- The extra data has 33 bytes. -/
+  | extraData
+  /-- The difficulty is one above the right one. -/
+  | difficultyUp
+  /-- The difficulty is one below the right one. -/
+  | difficultyDown
+  /-- The nonce is not zero, from Paris. -/
+  | nonce
+  /-- The ommers hash is not that of the empty list, from Paris. -/
+  | ommersHash
+  /-- The parent hash is another hash. -/
+  | parentHash
+  /-- The excess blob gas is one above the right one. -/
+  | excessUp
+  /-- The excess blob gas is one below the right one, or 2 where the right one is 0. -/
+  | excessDown
+  deriving Repr, BEq
 
-/-- A header and a child that follows it at the same fork, right in most fields.
+/-- The faults that a header at a fork can have, those of the later forks twice. -/
+def HeaderFault.at (fork : Fork) : List HeaderFault :=
+  [.gasUsedAbove, .gasLimitUp, .gasLimitDown, .gasLimitFloor, .sameTime, .earlier, .numberUp,
+    .numberSame, .genesis, .extraData, .parentHash]
+  ++ (if fork ≥ .london then [.baseFeeUp, .baseFeeDown, .baseFeeUp, .baseFeeDown] else [])
+  ++ (if fork < .paris then [.difficultyUp, .difficultyDown, .difficultyDown]
+    else [.difficultyUp, .difficultyUp, .nonce, .ommersHash, .nonce, .ommersHash])
+  ++ (if fork ≥ .dencun then [.excessUp, .excessDown, .excessUp, .excessDown, .excessUp,
+    .excessDown] else [])
 
-The child takes what EthLib expects of it, and now and then a value beside that.
+/-- A parent at a fork and a child at a fork, with the one fault of the child. -/
+structure HeaderPair where
+  /-- The fork of the parent, and its name in the reference. -/
+  parentFork : Fork × String
+  /-- The fork of the child, and its name in the reference. -/
+  fork : Fork × String
+  /-- The parent. -/
+  parent : RawHeader
+  /-- The child. -/
+  child : RawHeader
+  /-- What is wrong with the child. -/
+  fault : HeaderFault
 
-So a rule that EthLib has wrong shows as a child that the reference refuses. -/
-def genHeaderPair : Gen ((Fork × String) × RawHeader × RawHeader) := do
-  let fork ← genFork
-  let parent ← genRawHeader fork.1
-  let parentBytes := enc (parent.item fork.1)
-  let step := parent.gasLimit / 1024
-  let gasLimit ← Gen.frequency [(4, pure parent.gasLimit),
-    (4, Gen.element [parent.gasLimit + step - 1, parent.gasLimit - step + 1]),
-    (1, Gen.element [parent.gasLimit + step, parent.gasLimit - step, parent.gasLimit + step + 1,
-      parent.gasLimit - step - 1, 4999, 5000])]
-  let gasUsed ← Gen.frequency [(8, Gen.nat (.constant 0 gasLimit)), (1, pure gasLimit),
-    (1, pure (gasLimit + 1))]
-  let elapsed ← Gen.frequency [(8, Gen.nat (.constant 1 30)), (2, Gen.nat (.constant 1 1200)),
-    (1, pure 0)]
+instance : Repr HeaderPair where
+  reprPrec c _ := s!"{c.parentFork.1.name} {c.fork.1.name} {reprStr c.fault} \
+    {hex (enc (c.parent.item c.parentFork.1))} {hex (enc (c.child.item c.fork.1))}"
+
+/-- A header and a child that follows it, valid or with one fault.
+
+The child takes the base fee, the excess blob gas and the difficulty that EthLib expects of it.
+
+So a rule that EthLib has wrong shows as a valid child that the reference refuses.
+
+A fault moves one field to the first value that its rule refuses, so no fault hides another.
+
+A valid child is also at the edge of each rule:
+
+- Its gas limit is the last one near enough to the parent's, on either side.
+- Its gas used is its gas limit.
+- Its extra data has 32 bytes.
+- It comes one second after its parent.
+
+At the first block of London the gas limit of the parent counts twice, as EIP-1559 says. -/
+def genHeaderPairAt (parentFork fork : Fork × String) : Gen HeaderPair := do
+  let fault ← Gen.frequency [(3, pure HeaderFault.none), (7, Gen.element (HeaderFault.at fork.1))]
+  let parent ← genRawHeader parentFork.1
+  let limit := if fault == .gasLimitFloor then 5001 else max parent.gasLimit 6000
+  -- The gas that the parent used moves the base fee: below, at and above the target.
+  let used ← Gen.frequency [(3, Gen.nat (.constant 0 limit)),
+    (3, Gen.element [limit / 2, limit / 2 + 1, limit / 2 - 1, 0, limit])]
+  let parent := { parent with gasLimit := limit, gasUsed := used }
+  let parentBytes := enc (parent.item parentFork.1)
+  -- EIP-1559: the parent of the first London block counts with twice its gas limit.
+  let before := if parentFork.1 < .london ∧ fork.1 ≥ .london then 2 * parent.gasLimit
+    else parent.gasLimit
+  let step := before / 1024
+  let gasLimit ← Gen.element [before, before + step - 1, before - step + 1]
+  let gasUsed ← Gen.frequency [(4, Gen.nat (.constant 0 gasLimit)), (1, pure gasLimit)]
+  let elapsed ← Gen.frequency [(6, Gen.nat (.constant 1 30)), (2, Gen.nat (.constant 1 1200)),
+    (2, pure 1)]
   let timestamp := parent.timestamp + elapsed
-  let number ← genNear (parent.number + 1)
-  let ommersHash ← if fork.1 ≥ .paris then
-      Gen.frequency [(15, pure emptyOmmers), (1, pure parent.roots)]
-    else pure parent.roots
-  let nonce ← Gen.frequency [(15, pure (bytesOf (List.replicate 8 0))),
-    (1, pure (bytesOf (List.replicate 7 0 ++ [1])))]
-  let parentHash ← Gen.frequency [(15, pure ⟨(keccak256 parentBytes).toArray⟩),
-    (1, pure parent.roots)]
-  let extraData ← genBytes (.constant 0 33)
+  let number := parent.number + 1
+  let extraData ← Gen.frequency [(3, genBytes (.constant 0 31)), (1, genBytesN 32)]
   -- What EthLib expects of the child, read from the parent as EthLib decodes it.
   let (baseFee, excess, difficulty) :=
-    match (Codec.decode parentBytes : Except RlpError (Header fork.1)) with
+    match (Codec.decode parentBytes : Except RlpError (Header parentFork.1)) with
     | .error _ => (0, 0, 0)
     | .ok p =>
       let excess := if hd : Fork.dencun ≤ fork.1 then
-          if hl : Fork.london ≤ fork.1 then expectedExcessBlobGas hl hd p else 0
+          if hl : Fork.london ≤ parentFork.1 then expectedExcessBlobGas hl hd p else 0
         else 0
       (expectedBaseFeeAcross p, excess,
         blockDifficulty fork.1 number timestamp parent.timestamp parent.difficulty
           (parent.ommersHash.data != emptyOmmers.data))
-  let child : RawHeader := {
-    parentHash, ommersHash, coinbase := parent.coinbase, roots := parent.roots
-    difficulty := ← genNear difficulty
-    number, gasLimit, gasUsed, timestamp, extraData, nonce
-    baseFee := ← genNear baseFee
+  let valid : RawHeader := {
+    parentHash := ⟨(keccak256 parentBytes).toArray⟩
+    ommersHash := if fork.1 ≥ .paris then emptyOmmers else parent.roots
+    coinbase := parent.coinbase, roots := parent.roots
+    difficulty, number, gasLimit, gasUsed, timestamp, extraData
+    nonce := if fork.1 ≥ .paris then bytesOf (List.replicate 8 0) else parent.roots.extract 0 8
+    baseFee
     blobGasUsed := 131072 * (← Gen.nat (.constant 0 9))
-    excessBlobGas := ← genNear excess }
-  pure (fork, parent, child)
+    excessBlobGas := excess
+    slotNumber := parent.slotNumber + 1 }
+  let child : RawHeader := match fault with
+    | .none => valid
+    | .gasUsedAbove => { valid with gasUsed := valid.gasLimit + 1 }
+    | .gasLimitUp => { valid with gasLimit := before + step, gasUsed := 0 }
+    | .gasLimitDown => { valid with gasLimit := before - step, gasUsed := 0 }
+    | .gasLimitFloor => { valid with gasLimit := 4999, gasUsed := 0 }
+    | .baseFeeUp => { valid with baseFee := baseFee + 1 }
+    | .baseFeeDown => { valid with baseFee := if baseFee = 0 then 2 else baseFee - 1 }
+    | .sameTime => { valid with timestamp := parent.timestamp }
+    | .earlier => { valid with timestamp := parent.timestamp - 1 }
+    | .numberUp => { valid with number := number + 1 }
+    | .numberSame => { valid with number := parent.number }
+    | .genesis => { valid with number := 0 }
+    | .extraData => { valid with extraData := bytesOf (List.replicate 33 7) }
+    | .difficultyUp => { valid with difficulty := difficulty + 1 }
+    | .difficultyDown => { valid with difficulty := difficulty - 1 }
+    | .nonce => { valid with nonce := bytesOf (List.replicate 7 0 ++ [1]) }
+    | .ommersHash => { valid with ommersHash := parent.roots }
+    | .parentHash => { valid with parentHash := parent.roots }
+    | .excessUp => { valid with excessBlobGas := excess + 1 }
+    | .excessDown => { valid with excessBlobGas := if excess = 0 then 2 else excess - 1 }
+  pure ⟨parentFork, fork, parent, child, fault⟩
 
-/-- EthLib accepts a header after its parent exactly when execution-specs does, the seal aside. -/
-def headerAfterParent (oracle : Oracle) : Property IO := propertyM do
-  let (fork, parent, child) ← forAllWith
-    (fun (fork, parent, child) =>
-      s!"{fork.2} {hex (enc (parent.item fork.1))} {hex (enc (child.item fork.1))}")
-    genHeaderPair
-  pure do
-    let parentBytes := enc (parent.item fork.1)
-    let childBytes := enc (child.item fork.1)
-    let expected ← oracle.ask ["headerpair", fork.2, hex parentBytes, hex childBytes]
-    annotate s!"the reference: {expected}"
-    let decoded : Except RlpError (Header fork.1 × Header fork.1) := do
-      pure (← Codec.decode parentBytes, ← Codec.decode childBytes)
+/-- The labels of a header after its parent: its fork, its fault, and what EthLib says of it. -/
+def labelHeaderPair (c : HeaderPair)
+    (result : Except BlockError Unit) : TestT IO Unit := do
+  labelFork c.fork.1
+  label s!"fault: {(((reprStr c.fault).splitOn " ").headD "").splitOn "." |>.getLastD ""}"
+  label (match result with
+    | .ok _ => "verdict: valid"
+    | .error error => s!"verdict: invalid, {errorName error}")
+  coverMin 1 "valid, before London" (result.isOk && c.fork.1 < .london)
+  classify "valid, London to Gray Glacier" (result.isOk && c.fork.1 ≥ .london && c.fork.1 < .paris)
+  coverMin 1 "valid, Paris and Shapella" (result.isOk && c.fork.1 ≥ .paris && c.fork.1 < .dencun)
+  coverMin 2 "valid, from Dencun" (result.isOk && c.fork.1 ≥ .dencun)
+  let before := if c.parentFork.1 < .london ∧ c.fork.1 ≥ .london then 2 * c.parent.gasLimit
+    else c.parent.gasLimit
+  coverMin 3 "valid, the gas limit as far above the parent's as it may be"
+    (result.isOk && c.child.gasLimit > before)
+  coverMin 3 "valid, the gas limit as far below the parent's as it may be"
+    (result.isOk && c.child.gasLimit < before)
+  coverMin 2 "valid, the gas used is the gas limit"
+    (result.isOk && c.child.gasUsed = c.child.gasLimit)
+  coverMin 2 "valid, extra data of 32 bytes" (result.isOk && c.child.extraData.size = 32)
+  coverMin 2 "valid, one second after the parent"
+    (result.isOk && c.child.timestamp = c.parent.timestamp + 1)
+  label (if c.parent.gasUsed = c.parent.gasLimit / 2 then "parent gas: at the target"
+    else if c.parent.gasUsed > c.parent.gasLimit / 2 then "parent gas: above the target"
+    else "parent gas: below the target")
+  coverMin 6 "the excess blob gas that EthLib expects is not zero"
+    (c.fork.1 ≥ .dencun && 0 < c.child.excessBlobGas)
+
+/-- What EthLib says of a header after its parent, or none where a header does not decode. -/
+def checkPair (c : HeaderPair) : Option (Except BlockError Unit) :=
+  if h : c.parentFork.1 ≤ c.fork.1 then
+    let decoded : Except RlpError (Header c.parentFork.1 × Header c.fork.1) := do
+      pure (← Codec.decode (enc (c.parent.item c.parentFork.1)),
+        ← Codec.decode (enc (c.child.item c.fork.1)))
     match decoded with
-    | .error _ => failWith "EthLib does not decode a header"
-    | .ok (p, c) =>
-      let result := checkHeader (Nat.le_refl _) p c
+    | .error _ => none
+    | .ok (p, child) => some (checkHeader h p child)
+  else none
+
+/-- EthLib accepts a header after its parent exactly when execution-specs does, the seal aside.
+
+The two headers are at the same fork.
+
+A child is valid, or has one fault: each rule is met alone, at the first value that it refuses. -/
+def headerAfterParent (oracle : Oracle) : Property IO := propertyM do
+  let c ← forAll (do
+    let fork ← genFork
+    genHeaderPairAt fork fork)
+  pure do
+    let expected ← oracle.ask ["headerpair", c.fork.2, hex (enc (c.parent.item c.fork.1)),
+      hex (enc (c.child.item c.fork.1))]
+    annotate s!"the reference: {expected}"
+    match checkPair c with
+    | none => failWith "EthLib does not decode a header"
+    | some result =>
       annotate s!"EthLib: {repr result}"
+      labelHeaderPair c result
       result.isOk === (expected == "ok")
+      -- A valid header is accepted, and a header with a fault refused.
+      result.isOk === (c.fault == .none)
+
+/-- The index of a fork of the reference in its order of forks. -/
+def referenceIndex (name : String) : Nat :=
+  (eelsForks.findIdx? (·.2 == name)).getD 0
+
+/-- A fork and the fork of its parent: the fork before it, or the same rules under another name.
+
+The reference defines a header after a parent of the fork just before, and no further back. -/
+def genForkStep : Gen ((Fork × String) × (Fork × String)) :=
+  let steps := releaseForks.flatMap fun fork =>
+    (releaseForks.filter fun parent =>
+      parent.1 < fork.1 ∧ referenceIndex parent.2 + 1 ≥ referenceIndex fork.2).map (·, fork)
+  let first (since : Fork) := steps.filter fun (parent, fork) => parent.1 < since ∧ fork.1 ≥ since
+  -- The steps into London, Paris and Dencun change a rule, so they come as often as the rest.
+  Gen.frequency [(3, Gen.element steps), (1, Gen.element (first .london)),
+    (1, Gen.element (first .paris)), (1, Gen.element (first .dencun)),
+    (1, Gen.element (steps.filter fun (parent, _) => parent.1 ≥ .dencun))]
+
+/-- EthLib accepts the first header of a fork after its parent as the sources say.
+
+The parent is at the fork before, so the child is the first block of its fork.
+
+- At London the parent has no base fee: the child takes the initial one.
+  The gas limit of the parent counts twice.
+- At Dencun the parent has no blob gas, which counts as zero.
+- From Pectra the excess blob gas reads the blob gas of the parent, at the target of the child.
+- Before Paris the difficulty follows the rule of the child.
+
+The reference is `validate_header` of the fork of the child, in execution-specs.
+
+Two rules are added to it from the EIPs, as the oracle says:
+
+- The gas limit at the first London block, which execution-specs does not check.
+- The blob gas of a parent from Dencun on, which execution-specs reads as zero at a new fork. -/
+def headerAcrossForks (oracle : Oracle) : Property IO := propertyM do
+  let c ← forAll (do
+    let (parentFork, fork) ← genForkStep
+    genHeaderPairAt parentFork fork)
+  pure do
+    let expected ← oracle.ask ["headeracross", c.parentFork.2, c.fork.2,
+      hex (enc (c.parent.item c.parentFork.1)), hex (enc (c.child.item c.fork.1))]
+    annotate s!"the reference: {expected}"
+    match checkPair c with
+    | none => failWith "EthLib does not decode a header"
+    | some result =>
+      annotate s!"EthLib: {repr result}"
+      labelHeaderPair c result
+      label s!"step: {c.parentFork.2} to {c.fork.2}"
+      coverMin 1 "the two forks have one name in the reference" (c.parentFork.2 == c.fork.2)
+      coverMin 5 "the first block of London" (c.parentFork.1 < .london && c.fork.1 ≥ .london)
+      coverMin 5 "the first block of Paris" (c.parentFork.1 < .paris && c.fork.1 ≥ .paris)
+      coverMin 5 "the first block of Dencun" (c.parentFork.1 < .dencun && c.fork.1 ≥ .dencun)
+      coverMin 6 "the first block of a fork after Dencun"
+        (c.parentFork.1 ≥ .dencun && c.parentFork.2 != c.fork.2)
+      result.isOk === (expected == "ok")
+      result.isOk === (c.fault == .none)
 
 /-! ## Receipts -/
 
 /-- A receipt as bytes at a fork: its type byte, or none, and its almost valid fields. -/
-def genReceiptBytes : Gen ((Fork × String) × ByteArray) := do
-  let fork ← genFork
+def genReceiptBytes (forks : List (Fork × String)) : Gen ((Fork × String) × ByteArray) := do
+  let fork ← genForkOf forks
   let outcome ← Gen.frequency [
     (if fork.1 ≥ .byzantium then 6 else 1, Item.scalar <$> Gen.element [0, 1]),
     (if fork.1 ≥ .byzantium then 1 else 6, Item.bytes <$> genBytesN 32),
     (1, Item.scalar <$> Gen.element [2, 255, 256])]
   let gas ← Item.scalar <$> genNatNear 64 [2 ^ 64, 2 ^ 256]
-  let logs ← Gen.list (.linear 0 3) genLog
+  let logs ← Gen.frequency [(1, pure []), (3, Gen.list (.constant 1 3) genLog)]
   let bloomBytes ← Gen.frequency [(8, pure ⟨(logsBloom logs).toArray⟩), (1, genBytesN 255)]
   let item := Item.list [outcome, gas, .bytes bloomBytes, .list (logs.map logItem)]
   let mutations ← Gen.frequency [(3, pure []), (1, Gen.list (.constant 1 2) genMutation)]
   let types := (List.range 5).filter fun type =>
     type = 0 ∨ (Execution.Transactions.typeFork (UInt8.ofNat type)).any (· ≤ fork.1)
-  let type ← Gen.frequency [(9, Gen.element types.reverse), (1, Gen.nat (.constant 0 5))]
+  let type ← Gen.frequency [(8, Gen.element types.reverse), (1, Gen.nat (.constant 0 5)),
+    (1, Gen.element [5, 0x7f, 0x80, 0xbf])]
   let payload := enc (mutateAll mutations item)
   pure (fork, if type = 0 then payload else ⟨#[UInt8.ofNat type]⟩ ++ payload)
 
@@ -248,10 +507,68 @@ def describeReceipt (fork : Fork) (bytes : ByteArray) : String :=
 They agree on whether the bytes hold a receipt of the fork.
 
 Then they agree on its type, its outcome, its gas, its logs and the hash of its fields. -/
-def receiptBytes (oracle : Oracle) : Property IO := propertyM do
-  let (fork, bytes) ← forAllWith (fun (fork, bytes) => s!"{fork.2} {hex bytes}") genReceiptBytes
+def receiptBytes (oracles : Oracles) : Property IO := propertyM do
+  let (fork, bytes) ← forAllWith (fun (fork, bytes) => s!"{fork.1.name} {hex bytes}")
+    (genReceiptBytes oracles.forks)
   pure do
-    describeReceipt fork.1 bytes === (← oracle.ask ["receipt", fork.2, hex bytes])
+    labelFork fork.1
+    let first := bytes.data.getD 0 0
+    label (if bytes.isEmpty then "form: no byte" else if 0xc0 ≤ first then "form: legacy"
+      else if 1 ≤ first ∧ first ≤ 4 then s!"form: type {first}" else "form: another first byte")
+    match decodeReceipt fork.1 bytes with
+    | .ok (_, r) =>
+      label (match r.outcome with
+        | .postState _ _ => "verdict: a receipt with a state root"
+        | .status _ succeeded =>
+          if succeeded then "verdict: a receipt with status 1"
+          else "verdict: a receipt with status 0")
+      label (if r.logs.isEmpty then "logs: 0" else if r.logs.length = 1 then "logs: 1"
+        else "logs: 2+")
+      coverMin 10 "a log with a topic" (r.logs.any (!·.topics.isEmpty))
+    | .error (.decoding error) => label s!"verdict: no receipt, {errorName error}"
+    | .error error => label s!"verdict: no receipt, {errorName error}"
+    describeReceipt fork.1 bytes === (← (oracles.at fork).ask ["receipt", fork.2, hex bytes])
+    -- The bytes that EthLib writes for a receipt that it read are the bytes that it read.
+    if let .ok (type, r) := decodeReceipt fork.1 bytes then
+      orError (hex <$> encodeReceipt type r) === hex bytes
+
+/-- The receipts of a block count its gas so far, and each holds its outcome and its logs.
+
+The outcome is the state root before Byzantium, and the status from it, at every fork.
+
+The gas of a receipt is the gas before the list, and that of each transaction up to its own.
+
+The model is a sum in `Nat`. -/
+def receiptsOfBlock : Property IO := propertyM do
+  let fork ← forAllWith (·.1.name) (genForkOf (releaseForks ++ lateForks))
+  let results ← forAllWith
+    (fun rs => toString (rs.map fun (r : Bool × Nat × List TxLog) => (r.1, r.2.1, r.2.2.length)))
+    (Gen.frequency [(1, pure []), (9, Gen.list (.constant 1 5) (Gen.zip Gen.bool
+      (Gen.zip (Gen.nat (.exponential 0 (2 ^ 40))) (Gen.list (.constant 0 2) genLog))))])
+  let start ← forAll (Gen.frequency [(1, pure 0), (1, Gen.nat (.exponential 0 (2 ^ 40)))])
+  pure do
+    let stateRoot : Hash32 := Vector.replicate 32 7
+    let inputs := results.map fun (succeeded, gas, logs) =>
+      (Outcome.make fork.1 succeeded fun _ => stateRoot, gas, logs)
+    let receipts := makeReceiptsFrom (fork := fork.1) start inputs
+    coverMin 7 "a state root, before Byzantium" (fork.1 < .byzantium && !results.isEmpty)
+    coverMin 22 "a status, from Byzantium" (fork.1 ≥ .byzantium && !results.isEmpty)
+    coverMin 3 "no transaction" results.isEmpty
+    coverMin 23 "two transactions or more" (2 ≤ results.length)
+    coverMin 14 "gas before the list" (0 < start && !results.isEmpty)
+    receipts.length === results.length
+    for (receipt, i) in receipts.zipIdx do
+      let (succeeded, _, logs) := results.getD i (false, 0, [])
+      receipt.cumulativeGasUsed === start + ((results.take (i + 1)).map (·.2.1)).sum
+      hexV receipt.bloom === hexV (logsBloom logs)
+      receipt.logs.length === logs.length
+      (match receipt.outcome with
+        | .postState _ root => s!"root {hexV root}"
+        | .status _ status => s!"status {status}") ===
+        (if fork.1 < .byzantium then s!"root {hexV stateRoot}" else s!"status {succeeded}")
+    if start = 0 then
+      (makeReceipts (fork := fork.1) inputs).map (·.cumulativeGasUsed) ===
+        receipts.map (·.cumulativeGasUsed)
 
 /-! ## Difficulty and rewards -/
 
@@ -268,30 +585,85 @@ instance : Repr DifficultyCase where
   reprPrec c _ := s!"{c.fork.2} number {c.number} elapsed {c.elapsed} parentTimestamp \
     {c.parentTimestamp} parentDifficulty {c.parentDifficulty} ommers {c.parentHasOmmers}"
 
-/-- Inputs around each period of the bomb, each delay, each step of the time, and the minimum. -/
+/-- The delay of the bomb at a fork, from the EIPs: 649, 1234, 2384, 3554, 4345 and 5133. -/
+def delayOf (fork : Fork) : Nat :=
+  if fork < .byzantium then 0 else if fork < .constantinople then 3000000
+  else if fork < .muirGlacier then 5000000 else if fork < .london then 9000000
+  else if fork < .arrowGlacier then 9700000 else if fork < .grayGlacier then 10700000
+  else 11400000
+
+/-- Inputs around each period of the bomb, each delay, each step of the time, and the minimum.
+
+The number is mostly near a period of the bomb of the fork:
+
+- Below the delay of the fork.
+- In the first two periods, where the bomb is zero.
+- At the third period, where the bomb is one.
+- Far above.
+
+The time since the parent is near each step of the factor: 9 and 10 seconds, 13, and the least.
+
+The parent's difficulty is near the minimum, where the result is the minimum or just above. -/
 def genDifficultyCase : Gen DifficultyCase := do
-  let fork ← genWorkFork
-  let delay ← Gen.element [0, 3000000, 5000000, 9000000, 9700000, 10700000, 11400000]
+  -- Each fork as often as another: each has its delay of the bomb.
+  let fork ← Gen.element (releaseForks.filter fun fork => fork.1 < .paris)
+  let delay ← Gen.frequency [(3, pure (delayOf fork.1)),
+    (1, Gen.element [0, 3000000, 5000000, 9000000, 9700000, 10700000, 11400000])]
   let number ← Gen.frequency [
-    (4, (fun (period : Nat) (d : Nat) => delay + period * 100000 + d - 2) <$>
-      Gen.nat (.constant 0 60) <*> Gen.nat (.constant 0 4)),
+    (5, (fun (period : Nat) (d : Nat) => delay + period * 100000 + d - 2) <$>
+      Gen.frequency [(3, Gen.element [0, 1, 2, 3]), (2, Gen.nat (.constant 4 60))] <*>
+      Gen.nat (.constant 0 4)),
     (1, Gen.nat (.exponential 0 30000000))]
-  let elapsed ← Gen.frequency [(4, Gen.nat (.constant 0 100)), (2, Gen.nat (.constant 880 1010)),
-    (1, Gen.nat (.exponential 0 (2 ^ 32)))]
+  let elapsed ← Gen.frequency [(3, Gen.nat (.constant 1 20)), (3, Gen.nat (.constant 0 100)),
+    (2, Gen.nat (.constant 880 1010)), (1, Gen.nat (.exponential 0 (2 ^ 32)))]
   let parentDifficulty ← Gen.frequency [(2, Gen.nat (.constant 131072 135168)),
-    (2, Gen.nat (.exponential 131072 (2 ^ 80))), (1, Gen.element [2 ^ 64 - 1, 2 ^ 64, 2 ^ 128])]
-  pure ⟨fork, number, elapsed, ← Gen.nat (.exponential 0 (2 ^ 40)), parentDifficulty,
-    ← Gen.bool⟩
+    (2, (fun (k : Nat) (d : Nat) => 131072 + 64 * k + d - 1) <$> Gen.nat (.constant 0 8) <*>
+      Gen.nat (.constant 0 2)),
+    (3, Gen.nat (.exponential 131072 (2 ^ 80))), (1, Gen.element [2 ^ 64 - 1, 2 ^ 64, 2 ^ 128])]
+  let parentTimestamp ← Gen.nat (.exponential 0 (2 ^ 40))
+  -- One case in eight lands on the minimum.
+  --
+  -- The parent is `64 k` above it, with no bomb, and the time gives the factor `-k`.
+  let k ← Gen.nat (.constant 1 8)
+  let late ← if fork.1 < .homestead then Gen.nat (.constant 13 100)
+    else if fork.1 < .byzantium then (10 * (k + 1) + ·) <$> Gen.nat (.constant 0 9)
+    else (9 * (k + 1) + ·) <$> Gen.nat (.constant 0 8)
+  let onMinimum : DifficultyCase := ⟨fork, 1, late, parentTimestamp,
+    131072 + 64 * (if fork.1 < .homestead then 1 else k), false⟩
+  Gen.frequency [(7, pure ⟨fork, number, elapsed, parentTimestamp, parentDifficulty, ← Gen.bool⟩),
+    (1, pure onMinimum)]
 
 /-- The difficulty of a block is the one of execution-specs, at every fork before Paris. -/
 def difficulty (oracle : Oracle) : Property IO := propertyM do
   let c ← forAll genDifficultyCase
   pure do
     let timestamp := c.parentTimestamp + c.elapsed
+    let fork := c.fork.1
+    label (if fork < .homestead then "rule: Frontier" else if fork < .byzantium then
+      "rule: Homestead to Spurious Dragon" else "rule: Byzantium on")
+    label s!"bomb delay: {bombDelay fork}"
+    let factor := timeFactor fork timestamp c.parentTimestamp c.parentHasOmmers
+    label (if factor = -99 then "time factor: -99, the least" else if factor < 0 then
+      "time factor: below 0" else if factor = 0 then "time factor: 0" else if factor = 1 then
+      "time factor: 1" else "time factor: 2")
+    coverMin 10 "the parent has ommers, from Byzantium" (c.parentHasOmmers && fork ≥ .byzantium)
+    let periods := (c.number - bombDelay fork) / 100000
+    label (if c.number < bombDelay fork then "bomb: the number is below the delay"
+      else if periods < 2 then "bomb: none, in the first two periods"
+      else if periods = 2 then "bomb: 1, the third period" else "bomb: 2 or more")
+    let step : Int := c.parentDifficulty / 2048
+    let raw : Int := c.parentDifficulty + step * factor + bomb fork c.number
+    label (if raw < 131072 then "result: the minimum, by the rule" else if raw = 131072 then
+      "result: exactly the minimum" else "result: above the minimum")
+    classify "elapsed: 0 seconds" (c.elapsed = 0)
     let expected ← oracle.ask ["difficulty", c.fork.2, toString c.number, toString timestamp,
       toString c.parentTimestamp, toString c.parentDifficulty, toString c.parentHasOmmers]
     toString (blockDifficulty c.fork.1 c.number timestamp c.parentTimestamp c.parentDifficulty
       c.parentHasOmmers) === expected
+    -- From Paris on the difficulty is zero, at every fork.
+    for later in (releaseForks ++ lateForks).filter fun later => later.1 ≥ .paris do
+      blockDifficulty later.1 c.number timestamp c.parentTimestamp c.parentDifficulty
+        c.parentHasOmmers === 0
 
 /-- The rewards of a block are those of execution-specs, and none from Paris.
 
@@ -299,10 +671,14 @@ The block reward is the constant of the fork there.
 
 The reward of a beneficiary and of an ommer follow the Yellow Paper, 11.3, in `Nat`. -/
 def rewards (oracle : Oracle) : Property IO := propertyM do
-  let fork ← forAllWith (·.2) genWorkFork
+  -- Each fork as often as another: Byzantium alone has its reward.
+  let fork ← forAllWith (·.1.name) (Gen.element (releaseForks.filter fun fork => fork.1 < .paris))
   let ommers ← forAll (Gen.nat (.constant 0 2))
   let age ← forAll (Gen.nat (.constant 1 7))
   pure do
+    label s!"reward: {blockReward fork.1 / 10 ^ 18} ether"
+    label s!"ommers: {ommers}"
+    label s!"age: {age}"
     let expected ← oracle.ask ["reward", fork.2]
     let some reward := expected.toNat? | failWith expected
     blockReward fork.1 === reward
@@ -314,9 +690,16 @@ def rewards (oracle : Oracle) : Property IO := propertyM do
 /-- The requests hash is the one of EIP-7685: a request of its type alone is left out. -/
 def requestsHashOf (oracle : Oracle) : Property IO := propertyM do
   let requests ← forAllWith (fun rs => " ".intercalate (rs.map hex))
-    (Gen.list (.linear 0 5) (Gen.frequency [(3, genBytes (.linear 0 40)),
-      (2, genBytes (.constant 0 2))]))
+    (Gen.frequency [(1, pure []), (9, Gen.list (.constant 1 5)
+      (Gen.frequency [(3, genBytes (.linear 0 40)), (2, genBytes (.constant 0 2))]))])
   pure do
+    label (if requests.isEmpty then "requests: 0" else if requests.length = 1 then "requests: 1"
+      else "requests: 2+")
+    coverMin 12 "a request of no byte" (requests.any (·.size = 0))
+    coverMin 12 "a request of its type alone" (requests.any (·.size = 1))
+    coverMin 13 "a request of two bytes" (requests.any (·.size = 2))
+    coverMin 21 "a request with data" (requests.any (2 < ·.size))
+    coverMin 4 "every request is left out" (!requests.isEmpty && requests.all (·.size ≤ 1))
     hexV (requestsHash requests) === (← oracle.ask ("requestshash" :: requests.map hex))
 
 /-- The data of a deposit log, right in its offsets and sizes, then changed in a few bytes. -/
@@ -341,6 +724,11 @@ def genDepositData : Gen ByteArray := do
 def depositRequest (oracle : Oracle) : Property IO := propertyM do
   let data ← forAllWith hex genDepositData
   pure do
+    label (match depositRequestOfEvent data with
+      | .ok _ => "verdict: a deposit request"
+      | .error error => s!"verdict: no request, {errorName error}")
+    label (if data.size < 576 then "size: below 576" else if data.size = 576 then "size: 576"
+      else "size: above 576")
     orError (hex <$> depositRequestOfEvent data) === (← oracle.ask ["deposit", hex data])
 
 /-- A withdrawal: its numbers at the edges of 64 bits. -/
@@ -354,12 +742,25 @@ def listRoots (oracle : Oracle) : Property IO := propertyM do
   let withdrawals ← forAll (Gen.frequency [(4, Gen.list (.linear 0 20) genWithdrawal),
     (1, Gen.list (.constant 126 131) genWithdrawal)])
   let values ← forAllWith (fun vs => " ".intercalate (vs.map hex))
-    (Gen.frequency [(4, Gen.list (.linear 0 20) (genBytes (.linear 1 40))),
-      (1, Gen.list (.constant 126 131) (genBytes (.constant 1 3)))])
+    (Gen.frequency [(4, Gen.list (.linear 0 20) (Gen.frequency [(2, genBytes (.constant 1 31)),
+        (1, genBytes (.constant 32 40))])),
+      (1, Gen.list (.constant 126 131) (genBytes (.constant 1 3))),
+      -- From the index 256 on, the key of an item has three bytes.
+      (1, Gen.list (.constant 254 259) (genBytes (.constant 1 3)))])
   pure do
+    let size (n : Nat) : String := if n = 0 then "0" else if n = 1 then "1" else if n ≤ 16 then
+      "2 to 16" else if n ≤ 127 then "17 to 127" else if n ≤ 128 then "128" else if n ≤ 256 then
+      "129 to 256" else "257+"
+    label s!"withdrawals: {size withdrawals.length}"
+    label s!"values: {size values.length}"
+    coverMin 13 "a value of 32 bytes or more" (values.any (32 ≤ ·.size))
+    coverMin 15 "every value is below 32 bytes" (!values.isEmpty && values.all (·.size < 32))
     let words := withdrawals.map fun w =>
       s!"{w.index.toNat}:{w.validatorIndex.toNat}:{hexV w.address}:{w.amount.toNat}"
     orError (hexV <$> withdrawalsRoot withdrawals) === (← oracle.ask ("withdrawalsroot" :: words))
+    for w in withdrawals.take 3 do
+      ((Codec.encode w).toOption.bind fun bytes =>
+        (Codec.decode bytes : Except RlpError Withdrawal).toOption) === some w
     orError (hexV <$> indexedRoot values) === (← oracle.ask ("indexroot" :: values.map hex))
 
 end ExecutionProperty
@@ -377,11 +778,18 @@ After the fork an account of the list holds nothing.
 
 The recovery contract then holds what the accounts held, with what it held before. -/
 def daoFork (oracle : Oracle) : Property IO := propertyM do
-  let index ← forAll (Gen.nat (.constant 0 (DAO_ACCOUNTS.length + 1)))
+  let index ← forAll (Gen.frequency [(9, Gen.nat (.constant 0 (DAO_ACCOUNTS.length - 1))),
+    (1, Gen.element [DAO_ACCOUNTS.length, DAO_ACCOUNTS.length + 1])])
   let funded ← forAll (Gen.list (.linear 0 12)
     (Gen.zip (Gen.nat (.constant 0 (DAO_ACCOUNTS.length - 1))) (Gen.nat (.exponential 0 (2 ^ 80)))))
   let before ← forAll (Gen.nat (.exponential 0 (2 ^ 80)))
   pure do
+    label (if index < DAO_ACCOUNTS.length then "index: in the list" else "index: past the list")
+    label (if funded.isEmpty then "funded accounts: 0" else if funded.length = 1 then
+      "funded accounts: 1" else "funded accounts: 2+")
+    coverMin 1 "an account funded twice"
+      ((funded.map Prod.fst).eraseDups.length < funded.length)
+    coverMin 32 "the recovery contract holds ether before" (0 < before)
     let account := match DAO_ACCOUNTS[index]? with
       | some address => hexV address
       | none => "none"
@@ -462,11 +870,10 @@ instance : Repr OmmersCase where
 
 /-- A chain of nine blocks where some hold an ommer, and up to three candidates for the next. -/
 def genOmmersCase : Gen OmmersCase := do
-  let fork ← Gen.element [(Fork.frontier, "frontier"), (.homestead, "homestead"),
-    (.byzantium, "byzantium"), (.london, "london"), (.grayGlacier, "gray_glacier")]
+  let fork ← genWorkFork
   let root ← genRawHeader fork.1
   let root := { root with number := root.number + 1, gasLimit := max root.gasLimit 5000 }
-  let holders ← Gen.list (.singleton 9) (Gen.frequency [(2, pure false), (1, pure true)])
+  let holders ← Gen.list (.singleton 9) (Gen.frequency [(1, pure false), (1, pure true)])
   let chain := (List.range 8).foldl (fun (chain : List (RawHeader × List RawHeader)) i =>
       -- The block `i + 1` may hold a sibling of its parent, a child of the block `i - 1`.
       let ommers := if holders.getD i false ∧ 1 ≤ i then
@@ -477,11 +884,15 @@ def genOmmersCase : Gen OmmersCase := do
     [(root, [])]
   let block := Gen.nat (.constant 0 8)
   let mark : Gen UInt8 := Gen.element [1, 2]
-  let pick := Gen.frequency [(8, Pick.uncle <$> Gen.nat (.constant 2 7) <*> mark),
-    (2, Pick.uncle <$> block <*> mark), (1, Pick.included <$> block),
-    (1, Pick.canonical <$> block), (1, Pick.bad <$> Gen.nat (.constant 2 7) <*> mark)]
+  let fresh := Pick.uncle <$> Gen.nat (.constant 2 7) <*> mark
+  let pick := Gen.frequency [(8, fresh),
+    (3, Pick.uncle <$> Gen.element [0, 1, 8] <*> mark), (2, Pick.included <$> block),
+    (1, Pick.canonical <$> block), (1, pure (Pick.canonical 0)),
+    (1, Pick.bad <$> Gen.nat (.constant 2 7) <*> mark)]
   let picks ← Gen.frequency [(1, pure []), (6, Gen.list (.constant 1 2) pick),
-    (1, Gen.list (.singleton 3) pick)]
+    (1, Gen.list (.singleton 3) pick),
+    -- The same ommer twice.
+    (1, (fun p => [p, p]) <$> fresh)]
   pure ⟨fork, chain, picks, ← Gen.frequency [(9, pure true), (1, pure false)]⟩
 
 /-- The headers that the picks name. -/
@@ -497,7 +908,7 @@ def OmmersCase.candidates (c : OmmersCase) : List RawHeader :=
 where
   /-- A header that no case reads. -/
   default : RawHeader × List RawHeader :=
-    (⟨.empty, .empty, .empty, .empty, 0, 0, 0, 0, 0, .empty, .empty, 0, 0, 0⟩, [])
+    (⟨.empty, .empty, .empty, .empty, 0, 0, 0, 0, 0, .empty, .empty, 0, 0, 0, 0⟩, [])
 
 open EthLib.Execution.Blocks in
 /-- EthLib accepts the ommers of a block exactly when execution-specs does, the seal aside.
@@ -543,6 +954,21 @@ def ommersValid (oracle : Oracle) : Property IO := propertyM do
       let config : ChainConfig := ⟨1, Vector.replicate 20 0, [], []⟩
       let result := validateOmmers config false recent header ommers
       annotate s!"EthLib: {repr result}"
+      labelFork c.fork.1
+      label s!"ommers: {ommers.length}"
+      label (match result with
+        | .ok _ => "verdict: valid"
+        | .error (.invalidHeader error) => s!"verdict: invalid header, {errorName error}"
+        | .error error => s!"verdict: invalid, {errorName error}")
+      coverMin 7 "valid, with an ommer" (result.isOk && !ommers.isEmpty)
+      coverMin 1 "valid, with two ommers" (result.isOk && ommers.length = 2)
+      for pick in c.picks do
+        label (match pick with
+          | .uncle parent _ => if 2 ≤ parent ∧ parent ≤ 7 then "pick: a fresh ommer in range"
+            else "pick: a fresh ommer out of range"
+          | .included _ => "pick: an ommer of a recent block"
+          | .canonical _ => "pick: a block of the chain"
+          | .bad _ _ => "pick: a wrong difficulty")
       result.isOk === (expected == "ok")
 
 end ExecutionProperty

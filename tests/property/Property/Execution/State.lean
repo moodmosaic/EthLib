@@ -76,6 +76,25 @@ def Op.words : Op → List String
   | .commit => ["commit"]
   | .endTransaction => ["end"]
 
+/-- The name of an operation, without its arguments. -/
+def Op.name : Op → String
+  | .setBalance .. => "setBalance"
+  | .incrementNonce .. => "incrementNonce"
+  | .setCode .. => "setCode"
+  | .moveEther .. => "moveEther"
+  | .createEther .. => "createEther"
+  | .setStorage .. => "setStorage"
+  | .destroyStorage .. => "destroyStorage"
+  | .destroyAccount .. => "destroyAccount"
+  | .markCreated .. => "markCreated"
+  | .setTransient .. => "setTransient"
+  | .touch .. => "touch"
+  | .destroyTouched .. => "destroyTouched"
+  | .snapshot => "snapshot"
+  | .rollback => "rollback"
+  | .commit => "commit"
+  | .endTransaction => "endTransaction"
+
 /-! ## The model -/
 
 /-- An account of the model: its nonce, its balance and the index of its code. -/
@@ -204,31 +223,69 @@ def TrackerModel.reads (m : TrackerModel) : List String :=
       s!"{m.now.slot a k},{original},{(m.now.transient.lookup (a, k)).getD 0}"
     ";".intercalate ([account, toString hasStorage, toString alive] ++ keys)
 
+/-- An account of the tests. -/
+def genAccountIndex : Gen Nat := Gen.nat (.constant 0 (addresses.length - 1))
+
+/-- A key of the tests. -/
+def genSlotIndex : Gen Nat := Gen.nat (.constant 0 (slots.length - 1))
+
+/-- A small amount, so that balances reach zero. -/
+def genAmount : Gen Nat := Gen.nat (.constant 0 3)
+
+/-- An account: three times in four one that the model holds, if it holds one. -/
+def genLive (m : TrackerModel) : Gen Nat :=
+  let held := m.now.accounts.map Prod.fst
+  if held.isEmpty then genAccountIndex
+  else Gen.frequency [(3, Gen.element held), (1, genAccountIndex)]
+
+/-- A sender and an amount: mostly an account that holds ether, and at most what it holds. -/
+def genSpend (m : TrackerModel) : Gen (Nat × Nat) :=
+  let funded := m.now.accounts.filter fun (_, x) => 0 < x.balance
+  let any := Gen.zip genAccountIndex genAmount
+  if funded.isEmpty then any
+  else Gen.frequency [(3, do
+      let (a, x) ← Gen.element funded
+      pure (a, ← Gen.frequency [(2, Gen.nat (.constant 1 x.balance)), (2, pure x.balance),
+        (1, pure (x.balance + 1))])),
+    (1, any)]
+
+/-- A storage write: mostly to an account that the model holds, and often zero to a set word. -/
+def genStorageWrite (m : TrackerModel) : Gen (Nat × Nat × Nat) :=
+  let word := Gen.frequency [(1, pure 0), (3, Gen.nat (.constant 1 3))]
+  let fresh := Gen.zip (genLive m) (Gen.zip genSlotIndex word)
+  let held := m.now.storage.filter fun ((a, _), _) => (m.now.account a).isSome
+  if held.isEmpty then fresh
+  else Gen.frequency [(3, fresh),
+    (1, (fun (((a, k), _) : (Nat × Nat) × Nat) v => (a, k, v)) <$> Gen.element held <*>
+      Gen.element [0, 0, 1, 2])]
+
 /-- The model: operations on a few accounts and keys, with small balances so that accounts empty.
 
 A rollback and a commit need an open snapshot, and a transaction ends with none open.
 
-An account is touched, and the touched empty accounts destroyed, only before Paris. -/
+An account is touched, and the touched empty accounts destroyed, only before Paris.
+
+A write is mostly to an account that the model holds, so that storage and codes build up. -/
 def genOp (m : TrackerModel) : Gen Op :=
-  let account := Gen.nat (.constant 0 (addresses.length - 1))
-  let key := Gen.nat (.constant 0 (slots.length - 1))
-  let amount := Gen.frequency [(3, Gen.nat (.constant 0 3)), (1, Gen.nat (.exponential 0 (2 ^ 64)))]
+  let account := genLive m
+  let key := genSlotIndex
+  let amount := Gen.frequency [(3, genAmount), (1, Gen.nat (.exponential 0 (2 ^ 64)))]
   let word := Gen.frequency [(1, pure 0), (2, Gen.nat (.constant 1 3))]
   Gen.frequency ([
     (3, Op.setBalance <$> account <*> amount),
     (2, Op.incrementNonce <$> account),
     (2, Op.setCode <$> account <*> Gen.nat (.constant 0 (codes.length - 1))),
-    (3, Op.moveEther <$> account <*> account <*> amount),
+    (3, (fun (a, n) b => Op.moveEther a b n) <$> genSpend m <*> genAccountIndex),
     (1, Op.createEther <$> account <*> amount),
-    (5, Op.setStorage <$> account <*> key <*> word),
+    (6, (fun (a, k, v) => Op.setStorage a k v) <$> genStorageWrite m),
     (1, Op.destroyStorage <$> account),
-    (2, Op.destroyAccount <$> account),
-    (1, Op.markCreated <$> account),
-    (2, Op.setTransient <$> account <*> key <*> word),
+    (1, Op.destroyAccount <$> account),
+    (1, Op.markCreated <$> genAccountIndex),
+    (2, Op.setTransient <$> genAccountIndex <*> key <*> word),
     (3, pure .snapshot)]
     ++ (if m.stack.isEmpty then [(2, pure Op.endTransaction)]
       else [(3, pure Op.rollback), (2, pure Op.commit)])
-    ++ (if m.fork < .paris then [(2, Op.touch <$> account),
+    ++ (if m.fork < .paris then [(2, Op.touch <$> genAccountIndex),
       (2, Op.destroyTouched <$> Gen.subsequence (List.range addresses.length))] else []))
 
 /-- Whether an operation may run in a state of the model. -/
@@ -328,6 +385,51 @@ def TrackerModel.stateWords (m : TrackerModel) : List String :=
       | none => "none"
     ";".intercalate (account :: (List.range slots.length).map fun k => toString (m.now.slot a k))
 
+/-- The labels of an operation of the model: what it is, and what it did to the state. -/
+def labelOp (before after : TrackerModel) (op : Op) :
+    TestT IO Unit := do
+  label s!"fork: {before.fork.name}"
+  label s!"op: {op.name}"
+  let changed := before.now != after.now
+  let account (model : TrackerModel) (a : Nat) : Option Acct := model.now.account a
+  match op with
+  | .rollback =>
+    label (if changed then "a rollback that undoes a write" else "a rollback of no write")
+    coverMin 1 "a rollback that brings back an account"
+      ((List.range addresses.length).any fun a => (account before a).isNone &&
+        (account after a).isSome)
+    coverMin 2 "a rollback that brings back a storage word"
+      (before.now.storage != after.now.storage)
+    coverMin 3 "a rollback inside another snapshot" (2 ≤ before.stack.length)
+  | .commit => coverMin 2 "a commit inside another snapshot" (2 ≤ before.stack.length)
+  | .snapshot =>
+    coverMin 2 "snapshots: three deep or more" (3 ≤ after.stack.length)
+  | .moveEther a b n =>
+    label (if !changed ∧ 0 < n ∧ a ≠ b then "a move refused for the balance"
+      else if a = b then "a move to the sender itself" else "a move that is made")
+  | .setStorage a k v =>
+    label (if (account before a).isNone then "a storage write to no account"
+      else if v = 0 ∧ before.now.slot a k ≠ 0 then "a storage write that clears a word"
+      else if v = 0 then "a storage write of zero to no word"
+      else "a storage write of a word")
+  | .destroyAccount a =>
+    coverMin 3 "an account destroyed with storage" (before.now.storage.any (·.1.1 == a))
+  | .destroyTouched _ =>
+    classify "touched empty accounts destroyed" changed
+  | .endTransaction =>
+    coverMin 8 "a transaction ends with a changed state" (before.now != before.start)
+    coverMin 2 "a transaction ends with storage in the state" (!after.now.storage.isEmpty)
+    coverMin 3 "a transaction ends with transient storage" (!before.now.transient.isEmpty)
+  | .setBalance a _ | .incrementNonce a | .setCode a _ | .createEther a _ =>
+    classify "from Paris: a change leaves the account empty, and destroys it"
+      (before.fork ≥ .paris && (account before a).isSome && (account after a).isNone)
+    classify "before Paris: a change leaves an empty account"
+      (before.fork < .paris && account after a == some ⟨0, 0, 0⟩)
+  | _ => pure ()
+  coverMin 11 "a read of a word that differs from the word before the transaction"
+    ((List.range addresses.length).any fun a => (List.range slots.length).any fun k =>
+      after.now.slot a k ≠ after.start.slot a k)
+
 /-- The tracker reads as the model after every operation.
 
 The model copies its whole state at a snapshot, and the tracker keeps writes in layers.
@@ -338,7 +440,9 @@ A state holds no storage for an account that it does not hold. -/
 def trackerMachine : StateMachine TrackerModel Op Tracker IO where
   toModel := trackerModel
   initSut _ := pure .empty
-  applySut t _ m op := pure (t.step m.fork op)
+  applySut t before m op := do
+    labelOp before m op
+    pure (t.step m.fork op)
   invariants t m := do
     t.reads === m.reads
     if m.stack.isEmpty && m.now == m.start then
@@ -351,14 +455,12 @@ def trackerMachine : StateMachine TrackerModel Op Tracker IO where
 
 /-! ## The tracker beside `state.py`, one command type for each operation -/
 
-/-- The state of a scenario: the tracker, and whether the oracle holds its twin yet. -/
+/-- The state of a scenario: the tracker, and the model that the generators read. -/
 structure Beside where
   /-- EthLib's tracker. -/
   tracker : Tracker := .empty
-  /-- Whether the oracle was told to start a state. -/
-  started : Bool := false
-  /-- How many snapshots are open. -/
-  depth : Nat := 0
+  /-- The model of the tracker, which `next` moves while a sequence is generated. -/
+  model : TrackerModel := { fork := .frontier }
 
 instance : Inhabited Beside := ⟨{}⟩
 
@@ -367,18 +469,29 @@ structure BesideContext where
   oracle : Oracle
   fork : Fork × String
 
-/-- Run an operation on both sides, and compare what each then reads.
+/-- The model of a state, at the fork of the context. -/
+def Beside.modelAt (ctx : BesideContext) (s : Beside) : TrackerModel :=
+  { s.model with fork := ctx.fork.1 }
+
+/-- Run an operation on the three sides, and compare what each then reads.
+
+The model answers first, then the oracle.
 
 The oracle answers the reads of its state, and at the end of a transaction its state root too. -/
 def runBeside (ctx : BesideContext) (op : Op) (s : Beside) : TestT IO Beside := do
-  unless s.started do
-    let _ ← ctx.oracle.ask ["state", "new", ctx.fork.2]
+  let before := s.modelAt ctx
+  let after := before.step op
+  labelOp before after op
   let tracker := s.tracker.step ctx.fork.1 op
   let answer ← ctx.oracle.ask ("state" :: op.words)
   let reads := tracker.reads
+  reads === after.reads
   let mine ← match op with
     | .endTransaction =>
       let state := tracker.tx.parent.applyChanges
+      coverMin 7 "a state root of a state with an account" (!state.accounts.isEmpty)
+      coverMin 1 "a state root of a state with two accounts or more" (2 ≤ state.accounts.size)
+      coverMin 2 "a state root of a state with storage" (!state.storage.isEmpty)
       pure (reads ++ [orError (hexV <$> (stateRoot keccak256 state).mapError fun _ => ())])
     | _ => pure reads
   -- The reference has transient storage from Dencun and the original word from Constantinople.
@@ -392,35 +505,27 @@ def runBeside (ctx : BesideContext) (op : Op) (s : Beside) : TestT IO Beside := 
           {if ctx.fork.1 ≥ .dencun then transient else "0"}"
       | _ => part)
   " ".intercalate (mine.map strip) === answer
-  let depth := match op with
-    | .snapshot => s.depth + 1
-    | .rollback | .commit => s.depth - 1
-    | _ => s.depth
-  pure { tracker, started := true, depth }
+  pure { tracker, model := after }
 
-/-- A command of a scenario: an operation, with the oracle and the fork that run it.
+/-- A command of a scenario: an operation.
 
-`Command.apply` does not see the context, so each command carries it. -/
+The oracle and the fork that run it are in the context. -/
 structure Step where
-  ctx : BesideContext
   op : Op
 
-/-- Whether a step may run: the rule of the model, on the count of open snapshots. -/
-def Step.allowed (c : Step) (s : Beside) : Bool :=
-  match c.op with
-  | .rollback | .commit => 0 < s.depth
-  | .endTransaction => s.depth = 0
-  | .touch _ | .destroyTouched _ => c.ctx.fork.1 < .paris
-  | _ => true
+/-- The instance of a command type that holds an operation, from its generator in a model state.
 
-/-- An account of the tests. -/
-def genAccountIndex : Gen Nat := Gen.nat (.constant 0 (addresses.length - 1))
+`check` is the rule of the model, and `next` is the step of the model.
 
-/-- A key of the tests. -/
-def genSlotIndex : Gen Nat := Gen.nat (.constant 0 (slots.length - 1))
-
-/-- A small amount, so that balances reach zero. -/
-def genAmount : Gen Nat := Gen.nat (.constant 0 3)
+So a command is generated for the accounts and the snapshots that the commands before it leave. -/
+def stepCommand {κ : Type} (op : κ → Op) (gen : TrackerModel → Gen κ) :
+    Command κ Beside BesideContext IO where
+  check ctx c s := opAllowed (s.modelAt ctx) (op c)
+  apply ctx c := runBeside ctx (op c)
+  label c := reprStr (op c)
+  build ctx := gen { fork := ctx.fork.1 }
+  next ctx c s := { s with model := (s.modelAt ctx).step (op c) }
+  buildIn ctx s := gen (s.modelAt ctx)
 
 /-- Set a balance. -/
 structure WriteBalance extends Step
@@ -453,104 +558,60 @@ structure CommitSnapshot extends Step
 /-- End the transaction. -/
 structure EndTransaction extends Step
 
-instance : Command WriteBalance Beside BesideContext IO where
-  check _ c := c.allowed
-  apply _ c := runBeside c.ctx c.op
-  label c := reprStr c.op
-  build ctx := (fun a n => ⟨⟨ctx, .setBalance a n⟩⟩) <$> genAccountIndex <*> genAmount
+instance : Command WriteBalance Beside BesideContext IO :=
+  stepCommand (·.op) fun m => (fun a n => ⟨⟨.setBalance a n⟩⟩) <$> genLive m <*> genAmount
 
-instance : Command BumpNonce Beside BesideContext IO where
-  check _ c := c.allowed
-  apply _ c := runBeside c.ctx c.op
-  label c := reprStr c.op
-  build ctx := (fun a => ⟨⟨ctx, .incrementNonce a⟩⟩) <$> genAccountIndex
+instance : Command BumpNonce Beside BesideContext IO :=
+  stepCommand (·.op) fun m => (fun a => ⟨⟨.incrementNonce a⟩⟩) <$> genLive m
 
-instance : Command WriteCode Beside BesideContext IO where
-  check _ c := c.allowed
-  apply _ c := runBeside c.ctx c.op
-  label c := reprStr c.op
-  build ctx := (fun a k => ⟨⟨ctx, .setCode a k⟩⟩) <$> genAccountIndex <*>
+instance : Command WriteCode Beside BesideContext IO :=
+  stepCommand (·.op) fun m => (fun a k => ⟨⟨.setCode a k⟩⟩) <$> genLive m <*>
     Gen.nat (.constant 0 (codes.length - 1))
 
-instance : Command MoveEther Beside BesideContext IO where
-  check _ c := c.allowed
-  apply _ c := runBeside c.ctx c.op
-  label c := reprStr c.op
-  build ctx := (fun a b n => ⟨⟨ctx, .moveEther a b n⟩⟩) <$> genAccountIndex <*>
-    genAccountIndex <*> genAmount
+instance : Command MoveEther Beside BesideContext IO :=
+  stepCommand (·.op) fun m => (fun (a, n) b => ⟨⟨.moveEther a b n⟩⟩) <$> genSpend m <*>
+    genAccountIndex
 
-instance : Command WriteStorage Beside BesideContext IO where
-  check _ c := c.allowed
-  apply _ c := runBeside c.ctx c.op
-  label c := reprStr c.op
-  build ctx := (fun a k v => ⟨⟨ctx, .setStorage a k v⟩⟩) <$> genAccountIndex <*>
+instance : Command WriteStorage Beside BesideContext IO :=
+  stepCommand (·.op) fun m => (fun (a, k, v) => ⟨⟨.setStorage a k v⟩⟩) <$> genStorageWrite m
+
+instance : Command WipeStorage Beside BesideContext IO :=
+  stepCommand (·.op) fun m => (fun a => ⟨⟨.destroyStorage a⟩⟩) <$> genLive m
+
+instance : Command DestroyAccount Beside BesideContext IO :=
+  stepCommand (·.op) fun m => (fun a => ⟨⟨.destroyAccount a⟩⟩) <$> genLive m
+
+instance : Command MarkCreated Beside BesideContext IO :=
+  stepCommand (·.op) fun _ => (fun a => ⟨⟨.markCreated a⟩⟩) <$> genAccountIndex
+
+instance : Command WriteTransient Beside BesideContext IO :=
+  stepCommand (·.op) fun _ => (fun a k v => ⟨⟨.setTransient a k v⟩⟩) <$> genAccountIndex <*>
     genSlotIndex <*> genAmount
 
-instance : Command WipeStorage Beside BesideContext IO where
-  check _ c := c.allowed
-  apply _ c := runBeside c.ctx c.op
-  label c := reprStr c.op
-  build ctx := (fun a => ⟨⟨ctx, .destroyStorage a⟩⟩) <$> genAccountIndex
+instance : Command TouchAccount Beside BesideContext IO :=
+  stepCommand (·.op) fun _ => (fun a => ⟨⟨.touch a⟩⟩) <$> genAccountIndex
 
-instance : Command DestroyAccount Beside BesideContext IO where
-  check _ c := c.allowed
-  apply _ c := runBeside c.ctx c.op
-  label c := reprStr c.op
-  build ctx := (fun a => ⟨⟨ctx, .destroyAccount a⟩⟩) <$> genAccountIndex
-
-instance : Command MarkCreated Beside BesideContext IO where
-  check _ c := c.allowed
-  apply _ c := runBeside c.ctx c.op
-  label c := reprStr c.op
-  build ctx := (fun a => ⟨⟨ctx, .markCreated a⟩⟩) <$> genAccountIndex
-
-instance : Command WriteTransient Beside BesideContext IO where
-  check _ c := c.allowed
-  apply _ c := runBeside c.ctx c.op
-  label c := reprStr c.op
-  build ctx := (fun a k v => ⟨⟨ctx, .setTransient a k v⟩⟩) <$> genAccountIndex <*>
-    genSlotIndex <*> genAmount
-
-instance : Command TouchAccount Beside BesideContext IO where
-  check _ c := c.allowed
-  apply _ c := runBeside c.ctx c.op
-  label c := reprStr c.op
-  build ctx := (fun a => ⟨⟨ctx, .touch a⟩⟩) <$> genAccountIndex
-
-instance : Command SweepTouched Beside BesideContext IO where
-  check _ c := c.allowed
-  apply _ c := runBeside c.ctx c.op
-  label c := reprStr c.op
-  build ctx := (fun as => ⟨⟨ctx, .destroyTouched as⟩⟩) <$>
+instance : Command SweepTouched Beside BesideContext IO :=
+  stepCommand (·.op) fun _ => (fun as => ⟨⟨.destroyTouched as⟩⟩) <$>
     Gen.subsequence (List.range addresses.length)
 
-instance : Command OpenSnapshot Beside BesideContext IO where
-  check _ c := c.allowed
-  apply _ c := runBeside c.ctx c.op
-  label c := reprStr c.op
-  build ctx := pure ⟨⟨ctx, .snapshot⟩⟩
+instance : Command OpenSnapshot Beside BesideContext IO :=
+  stepCommand (·.op) fun _ => pure ⟨⟨.snapshot⟩⟩
 
-instance : Command RollBack Beside BesideContext IO where
-  check _ c := c.allowed
-  apply _ c := runBeside c.ctx c.op
-  label c := reprStr c.op
-  build ctx := pure ⟨⟨ctx, .rollback⟩⟩
+instance : Command RollBack Beside BesideContext IO :=
+  stepCommand (·.op) fun _ => pure ⟨⟨.rollback⟩⟩
 
-instance : Command CommitSnapshot Beside BesideContext IO where
-  check _ c := c.allowed
-  apply _ c := runBeside c.ctx c.op
-  label c := reprStr c.op
-  build ctx := pure ⟨⟨ctx, .commit⟩⟩
+instance : Command CommitSnapshot Beside BesideContext IO :=
+  stepCommand (·.op) fun _ => pure ⟨⟨.commit⟩⟩
 
-instance : Command EndTransaction Beside BesideContext IO where
-  check _ c := c.allowed
-  apply _ c := runBeside c.ctx c.op
-  label c := reprStr c.op
-  build ctx := pure ⟨⟨ctx, .endTransaction⟩⟩
+instance : Command EndTransaction Beside BesideContext IO :=
+  stepCommand (·.op) fun _ => pure ⟨⟨.endTransaction⟩⟩
 
 /-- The tracker reads as `state.py` of execution-specs after every command, at a fork.
 
 The scenario draws random sequences of the commands, and each runs on both sides.
+
+The setup starts the state of the reference, and a command is drawn for the state before it.
 
 At the end of a transaction the state root of the block's writes is the reference's. -/
 def trackerScenario (mode : Mode) (ctx : BesideContext) : Property IO :=
@@ -561,7 +622,11 @@ def trackerScenario (mode : Mode) (ctx : BesideContext) : Property IO :=
     Command.gen WipeStorage, Command.gen DestroyAccount, Command.gen MarkCreated,
     Command.gen WriteTransient, Command.gen TouchAccount, Command.gen SweepTouched,
     Command.gen OpenSnapshot, Command.gen WriteBalance, Command.gen CommitSnapshot,
-    Command.gen EndTransaction, Command.gen WriteStorage, Command.gen EndTransaction]
+    Command.gen EndTransaction, Command.gen WriteStorage, Command.gen EndTransaction,
+    Command.gen DestroyAccount, Command.gen RollBack]
+    (.linear 1 60) fun s => do
+      let _ ← ctx.oracle.ask ["state", "new", ctx.fork.2]
+      pure s
 
 end ExecutionProperty
 
@@ -587,60 +652,86 @@ The answer that EthLib builds for an account and some slots verifies.
 It shows what the state holds: the account or its absence, and each slot as set or not.
 
 An answer with one field changed is refused. -/
-def accountProofs : Property IO := pureIO do
+def accountProofs : Property IO := propertyM do
   let (model, ops) ← forAll (trackerModel.sequence (.linear 1 40))
-  let account ← forAll genAccountIndex
-  let keys ← forAll (Gen.list (.constant 0 3) genSlotIndex)
+  let account ← forAll (genLive (ops.foldl TrackerModel.step model))
+  -- Half the states gain an account with a balance and a few storage words at the end.
+  let extra ← forAll (Gen.frequency [(1, pure []),
+    (1, (Op.setBalance account 1 :: ·) <$> Gen.list (.constant 1 4)
+      (Op.setStorage account <$> genSlotIndex <*> Gen.nat (.constant 0 3)))])
+  let ops := ops ++ extra
+  let keys ← forAll (Gen.frequency [(1, Gen.list (.constant 0 3) genSlotIndex),
+    (2, Gen.shuffle (List.range slots.length))])
   let tamper ← forAll (Gen.element [Tamper.nonce, .balance, .codeHash, .storageHash, .slotValue 0,
-    .slotValue 1, .slotKey 0, .swapSlotProofs])
-  let tracker := (ops.foldl (Tracker.step model.fork) .empty).step model.fork .endTransaction
-  let final := (ops.foldl TrackerModel.step model).step .endTransaction
-  let state := tracker.tx.parent.applyChanges
-  let .ok stateRootHash := stateRoot keccak256 state | failWith "no state root"
-  let address := addressAt account
-  let .ok answer := AccountProof.ofState keccak256 state address (keys.map slotAt)
-    | failWith "no answer"
-  let exists_ := (final.now.account account).isSome
-  let truth : AccountOutcome := if exists_ then
-      .present (keys.map fun k => if final.now.slot account k = 0 then .absent else .set)
-    else .absent
-  match answer.verify keccak256 stateRootHash with
-  | .ok outcome => outcome === truth
-  | .error error => failWith s!"the answer of EthLib is refused: {repr error}"
-  let other : Hash32 := Vector.replicate 32 0x5a
-  let bump (s : StorageProof) : StorageProof := { s with value := s.value + 1 }
-  let rekey (s : StorageProof) : StorageProof :=
-    { s with key := if s.key == slotAt 0 then slotAt 1 else slotAt 0 }
-  let changed : Option AccountProof := match tamper with
-    | .nonce => some { answer with nonce := answer.nonce + 1 }
-    | .balance => some { answer with balance := answer.balance + 1 }
-    | .codeHash => some { answer with codeHash := other }
-    | .storageHash => some { answer with storageHash := other }
-    | .slotValue i =>
-      if i < answer.storageProof.length then
-        some { answer with storageProof := answer.storageProof.modify i bump }
-      else none
-    | .slotKey i =>
-      -- Another key reads another slot, and the answer is false when the two words differ.
-      match answer.storageProof[i]? with
-      | some s =>
-        if state.getStorage address (rekey s).key != s.value then
-          some { answer with storageProof := answer.storageProof.modify i rekey }
+    .slotValue 1, .slotKey 0, .slotKey 1, .swapSlotProofs, .swapSlotProofs])
+  pure do
+    let tracker := (ops.foldl (Tracker.step model.fork) .empty).step model.fork .endTransaction
+    let final := (ops.foldl TrackerModel.step model).step .endTransaction
+    let state := tracker.tx.parent.applyChanges
+    let .ok stateRootHash := stateRoot keccak256 state | failWith "no state root"
+    let address := addressAt account
+    let .ok answer := AccountProof.ofState keccak256 state address (keys.map slotAt)
+      | failWith "no answer"
+    let exists_ := (final.now.account account).isSome
+    let truth : AccountOutcome := if exists_ then
+        .present (keys.map fun k => if final.now.slot account k = 0 then .absent else .set)
+      else .absent
+    label s!"fork: {model.fork.name}"
+    label (if exists_ then "the account exists" else "the account is absent")
+    label s!"slots asked: {keys.length}"
+    coverMin 15 "a slot that is set" (exists_ && keys.any fun k => final.now.slot account k ≠ 0)
+    coverMin 14 "a slot that is not set, in a storage with words"
+      (exists_ && final.now.storage.any (·.1.1 == account) &&
+        keys.any fun k => final.now.slot account k = 0)
+    coverMin 8 "a slot of an account with no storage"
+      (exists_ && !keys.isEmpty && !final.now.storage.any (·.1.1 == account))
+    let words := (final.now.storage.filter (·.1.1 == account)).length
+    coverMin 9 "the storage of the account holds one word" (exists_ && words = 1)
+    coverMin 8 "the storage of the account holds two words or more" (exists_ && 2 ≤ words)
+    let accounts := final.now.accounts.length
+    label (if accounts = 0 then "accounts in the state: 0" else if accounts = 1 then
+      "accounts in the state: 1" else "accounts in the state: 2+")
+    match answer.verify keccak256 stateRootHash with
+    | .ok outcome => outcome === truth
+    | .error error => failWith s!"the answer of EthLib is refused: {repr error}"
+    let other : Hash32 := Vector.replicate 32 0x5a
+    let bump (s : StorageProof) : StorageProof := { s with value := s.value + 1 }
+    let rekey (s : StorageProof) : StorageProof :=
+      { s with key := if s.key == slotAt 0 then slotAt 1 else slotAt 0 }
+    let changed : Option AccountProof := match tamper with
+      | .nonce => some { answer with nonce := answer.nonce + 1 }
+      | .balance => some { answer with balance := answer.balance + 1 }
+      | .codeHash => some { answer with codeHash := other }
+      | .storageHash => some { answer with storageHash := other }
+      | .slotValue i =>
+        if i < answer.storageProof.length then
+          some { answer with storageProof := answer.storageProof.modify i bump }
         else none
-      | none => none
-    | .swapSlotProofs =>
-      match answer.storageProof with
-      | a :: b :: rest =>
-        -- A trie of one leaf proves every key by that leaf, so equal proofs are no change.
-        if a.proof.map hex != b.proof.map hex then
-          some { answer with storageProof :=
-            { a with proof := b.proof } :: { b with proof := a.proof } :: rest }
-        else none
-      | _ => none
-  if let some false_ := changed then
-    match false_.verify keccak256 stateRootHash with
-    | .ok outcome => failWith s!"a false answer is accepted as {repr outcome} after {repr tamper}"
-    | .error _ => pure ()
+      | .slotKey i =>
+        -- Another key reads another slot, and the answer is false when the two words differ.
+        match answer.storageProof[i]? with
+        | some s =>
+          if state.getStorage address (rekey s).key != s.value then
+            some { answer with storageProof := answer.storageProof.modify i rekey }
+          else none
+        | none => none
+      | .swapSlotProofs =>
+        match answer.storageProof with
+        | a :: b :: rest =>
+          -- A trie of one leaf proves every key by that leaf, so equal proofs are no change.
+          if a.proof.map hex != b.proof.map hex then
+            some { answer with storageProof :=
+              { a with proof := b.proof } :: { b with proof := a.proof } :: rest }
+          else none
+        | _ => none
+    let tamperName := ((reprStr tamper).splitOn " ").headD ""
+    let tamperName := (tamperName.splitOn ".").getLastD tamperName
+    label (if changed.isSome then s!"a false answer: {tamperName}" else "no false answer to try")
+    coverMin 3 "a false answer about an account that is absent" (changed.isSome && !exists_)
+    if let some false_ := changed then
+      match false_.verify keccak256 stateRootHash with
+      | .ok outcome => failWith s!"a false answer is accepted as {repr outcome} after {repr tamper}"
+      | .error _ => pure ()
 
 end ExecutionProperty
 
